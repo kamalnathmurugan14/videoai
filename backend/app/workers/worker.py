@@ -67,6 +67,7 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
         voice=project.voice, speed=project.speed, captions_enabled=project.captions_enabled,
         caption_style=project.caption_style, music_path=music_path, music_volume=project.music_volume,
         intro_enabled=project.intro_enabled, intro_title=project.intro_title or project.title,
+        gestures_enabled=project.gestures_enabled,
     )
     return spec, paths
 

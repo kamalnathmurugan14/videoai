@@ -40,6 +40,7 @@ class RenderSpec:
     music_volume: float = 0.15
     intro_enabled: bool = True
     intro_title: str = ""
+    gestures_enabled: bool = True
 
 
 @dataclass
@@ -271,7 +272,8 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
         progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: animating avatar")
         if spec.avatar_path is None:
             raise RenderError("No avatar selected")
-        frames_iter = provider.frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames, workdir, seed=si)
+        frames_iter = provider.frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames, workdir, seed=si,
+                                      gestures=spec.gestures_enabled)
         thumb_at = min(n_frames - 1, int((lead + 0.7) * fps)) if si == 0 else None
 
         def raw_frames():

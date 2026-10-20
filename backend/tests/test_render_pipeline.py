@@ -151,3 +151,39 @@ def test_voice_gender_and_engine_notes(tmp_path, monkeypatch):
     monkeypatch.setattr(get_settings(), "tts_providers", "edge,synthetic")
     engine, errors = tts.synthesize("Fallback reporting", "en-US-GuyNeural", 1.0, tmp_path / "y.wav")
     assert engine == "synthetic" and "edge: no network" in errors[0]
+
+
+def test_gesture_plan_and_hands(tmp_path):
+    import numpy as np
+    from PIL import Image
+
+    from app.services import gestures
+
+    fps = 24
+    env = np.zeros(fps * 8, np.float32)
+    env[:fps * 3] = 0.8   # phrase 1 (3 s)
+    env[fps * 4: fps * 8] = 0.7  # phrase 2 (4 s) after a pause
+    plan = gestures.plan(env, fps, 0)
+    assert len(plan) >= 3 and all(g.end > g.start for g in plan)
+    assert plan[0].start < 1 and any(g.start > 3.5 for g in plan)  # gestures follow the phrases, none during the pause
+    assert not any(3.3 < g.start < 3.9 for g in plan)
+    hands = gestures.HandGestures(256, (220, 170, 140), (60, 70, 90), env, fps, 0)
+    frame = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    hands.draw(frame, plan[0].start + 0.8, lambda x, y: (0.0, 0.0))  # hand fully raised
+    assert frame.getchannel("A").getbbox() is not None
+    empty = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    hands.draw(empty, 3.6, lambda x, y: (0.0, 0.0))  # during the pause hands are out of frame
+    assert empty.getchannel("A").getbbox() is None
+
+
+def test_puppet_gestures_toggle(tmp_path):
+    av = catalog.load_avatars()[0]
+    wav = tmp_path / "a.wav"
+    tts.synthesize("A fairly long sentence so that the speaker has time to gesture with their hands while talking.", "en-US-AriaNeural", 1.0, wav)
+    prov = avatar_mod.PuppetAvatarProvider()
+    n = 48
+    on = list(prov.frames(ASSETS_DIR / "avatars" / av["image"], av, wav, 192, 12, n, tmp_path, seed=0, gestures=True))
+    off = list(prov.frames(ASSETS_DIR / "avatars" / av["image"], av, wav, 192, 12, n, tmp_path, seed=0, gestures=False))
+    import numpy as np
+    diff = sum(int(np.abs(np.asarray(a).astype(int) - np.asarray(b).astype(int)).sum()) for a, b in zip(on, off))
+    assert diff > 0  # hands change the picture when enabled

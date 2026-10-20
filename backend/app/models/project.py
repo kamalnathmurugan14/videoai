@@ -26,6 +26,7 @@ class Project(Base):
     background: Mapped[dict] = mapped_column(JSON, default=dict)
     intro_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
     intro_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    gestures_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
     video_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)

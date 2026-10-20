@@ -120,7 +120,7 @@ def test_sceneries_and_intro_settings(client, auth):
     })
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["intro_enabled"] is False and out["intro_title"] == "Hello"
+    assert out["intro_enabled"] is False and out["intro_title"] == "Hello" and out["gestures_enabled"] is True
     assert out["scenes"][0]["background"]["scenery_id"] == sc[1]["id"]
     assert client.put(url, headers=auth, json={"background": {"type": "scenery", "scenery_id": "nope"}}).status_code == 422
 

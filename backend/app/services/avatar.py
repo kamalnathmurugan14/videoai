@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from ..config import get_settings
+from . import gestures as gest_mod
 from .tts import wav_samples
 
 DEFAULT_META = {
@@ -166,7 +167,7 @@ class AvatarProvider(ABC):
 
     @abstractmethod
     def frames(self, image_path: Path, meta: dict, wav: Path, size: int, fps: int, n_frames: int,
-               workdir: Path, seed: int = 0) -> Iterator[Image.Image]:
+               workdir: Path, seed: int = 0, gestures: bool = True) -> Iterator[Image.Image]:
         """Yield `n_frames` RGBA images of shape (size, size)."""
 
 
@@ -194,6 +195,9 @@ class PuppetAvatarProvider(AvatarProvider):
         rx, ry = x - pvx, y - pvy
         dx = dx + wh * ((math.cos(th) - 1) * rx - math.sin(th) * ry + p["yaw"])
         dy = dy + wh * (math.sin(th) * rx + (math.cos(th) - 1) * ry + p["nod"])
+        # shoulders: shrug on emphasis; upper body leans in toward the camera
+        sh = _sstep(chin + 0.02, chin + 0.10, y) * (1 - _sstep(0.88, 1.0, y)) * _sstep(0.10, 0.20, np.abs(x - mx))
+        dy = dy - p["shrug"] * 0.016 * sh - p["lean"] * 0.020 * np.clip((1.0 - y) / 0.6, 0, 1)
         # eyebrows lift
         ex = (m["eyes"][0][0] + m["eyes"][1][0]) / 2
         ey = (m["eyes"][0][1] + m["eyes"][1][1]) / 2
@@ -212,7 +216,7 @@ class PuppetAvatarProvider(AvatarProvider):
             dy = dy - 0.10 * p["jaw"] * lip  # upper lip lifts slightly, revealing the teeth
         return dx, dy
 
-    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0):
+    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0, gestures=True):
         m = {**DEFAULT_META, **(meta or {})}
         base = Image.open(image_path).convert("RGBA")
         if base.width != base.height:  # legacy non-square upload: centre on a square canvas
@@ -237,6 +241,13 @@ class PuppetAvatarProvider(AvatarProvider):
         photo = not m["has_mouth_art"]
 
         gain = size  # normalised -> pixels
+        hands = None
+        if gestures:
+            region = np.asarray(base)[int(size * 0.68): int(size * 0.78), int(size * 0.25): int(size * 0.75)].reshape(-1, 4)
+            region = region[region[:, 3] > 150]  # clothing just below the chin / above the faded bottom edge
+            sleeve = tuple(int(v) for v in np.median(region[:, :3], axis=0)) if len(region) else (70, 80, 110)
+            skin_rgb = tuple(int(c * 0.94) for c in _hex(m["skin"]))
+            hands = gest_mod.HandGestures(size, skin_rgb, sleeve, env, fps, seed)
 
         for i in range(n_frames):
             t = i / fps
@@ -246,11 +257,13 @@ class PuppetAvatarProvider(AvatarProvider):
             blink_phase = (t - 0.9) % blink_period
             closed = math.sin(math.pi * blink_phase / 0.17) if (t > 0.9 and blink_phase < 0.17) else 0.0
             p = {
-                "roll": g * (1.7 * math.sin(2 * math.pi * 0.21 * t + ph[0]) + 0.8 * math.sin(2 * math.pi * 0.53 * t + ph[1])),
-                "yaw": g * 0.0075 * math.sin(2 * math.pi * 0.17 * t + ph[2]),
-                "nod": g * 0.0055 * math.sin(2 * math.pi * 0.33 * t + ph[3]) + 0.007 * e,
-                "breath": 0.006 * math.sin(2 * math.pi * 0.27 * t + ph[4]),
-                "sway": g * 0.008 * math.sin(2 * math.pi * 0.13 * t + ph[5]) + 0.003 * math.sin(2 * math.pi * 0.41 * t + ph[6]),
+                "roll": g * (2.4 * math.sin(2 * math.pi * 0.23 * t + ph[0]) + 1.2 * math.sin(2 * math.pi * 0.57 * t + ph[1])),
+                "yaw": g * 0.011 * math.sin(2 * math.pi * 0.19 * t + ph[2]) + 0.004 * e * math.sin(2 * math.pi * 0.8 * t + ph[3]),
+                "nod": g * 0.0075 * math.sin(2 * math.pi * 0.36 * t + ph[3]) + 0.011 * e,
+                "shrug": float(np.clip(1.6 * (e - 0.45), 0, 1)) * (0.5 + 0.5 * math.sin(2 * math.pi * 0.7 * t + ph[5])),
+                "lean": 0.5 * g + 0.8 * e * (0.5 + 0.5 * math.sin(2 * math.pi * 0.31 * t + ph[6])),
+                "breath": 0.007 * math.sin(2 * math.pi * 0.27 * t + ph[4]),
+                "sway": g * 0.012 * math.sin(2 * math.pi * 0.15 * t + ph[5]) + 0.003 * math.sin(2 * math.pi * 0.41 * t + ph[6]),
                 "brow": float(np.clip(1.4 * (e - 0.35), 0, 1)) * (0.6 + 0.4 * math.sin(2 * math.pi * 0.9 * t + ph[7])),
                 "jaw": a * jaw_max,
                 "blink": closed,
@@ -280,6 +293,8 @@ class PuppetAvatarProvider(AvatarProvider):
                 eyes = [(*moved(ex, ey), er * size) for ex, ey, er in m["eyes"]]
                 if not photo:  # photos blink via the warp above; illustrations get a drawn lid
                     draw_eyelids(frame, [(x / size, y / size, r / size) for x, y, r in eyes], [_hex(m["skin"])] * 2, size, closed, photo)
+            if hands is not None:
+                hands.draw(frame, t, lambda hx, hy: tuple(float(v) * size for v in self._field(np.float32(hx), np.float32(hy), m, p)))
             yield frame
 
 
@@ -292,7 +307,7 @@ class CommandAvatarProvider(AvatarProvider):
 
     name = "command"
 
-    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0):
+    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0, gestures=True):
         cmd = get_settings().avatar_command
         if not cmd:
             raise RuntimeError("AVATAR_COMMAND is not set")

@@ -397,6 +397,13 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
         <p className="mt-2 text-xs text-slate-500">Each scene can override this in the Script tab, or use “Vary scenery per scene”.</p>
       </section>
       <section>
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="font-semibold">Body language</h3>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={p.gestures_enabled} onChange={(e) => set({ gestures_enabled: e.target.checked })} /> Hand gestures
+          </label>
+        </div>
+        <p className="mb-5 text-xs text-slate-500">Head, eyes, shoulders and body always move while talking. Gestures add illustrated hands (in the presenter's skin tone) that point, count and explain in time with the speech. Turn off for a head-and-shoulders look.</p>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-semibold">Intro</h3>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -507,7 +514,7 @@ export default function Editor() {
     const body = {
       title: p.title, aspect_ratio: p.aspect_ratio, avatar_id: p.avatar_id, voice: p.voice, speed: p.speed,
       captions_enabled: p.captions_enabled, caption_style: p.caption_style, music_volume: p.music_volume,
-      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', clear_music: !p.music_id, music_id: p.music_id || undefined,
+      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', gestures_enabled: p.gestures_enabled, clear_music: !p.music_id, music_id: p.music_id || undefined,
       scenes: p.scenes.map((s) => ({ text: s.text, background: s.background, media_asset_id: s.media_asset_id })),
     }
     const saved = await api.updateProject(id, body)
