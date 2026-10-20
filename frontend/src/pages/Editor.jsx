@@ -273,7 +273,7 @@ function MouthTuner({ asset, onAsset, setError }) {
   )
 }
 
-function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseAvatar }) {
+function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseAvatar, faceTracking }) {
   const mine = assets.filter((a) => a.kind === 'avatar')
   const [gender, setGender] = useState('female')
   const [removeBg, setRemoveBg] = useState(true)
@@ -298,6 +298,12 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
         const sel = p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id && a.mouth) : null
         return sel ? <MouthTuner asset={sel} onAsset={onAsset} setError={setError} /> : null
       })()}
+      {faceTracking === false && (
+        <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          ⚠ Precise face tracking is not active on this server, so mouth placement on photos is approximate.
+          See <Link to="/system" className="underline">System check</Link>.
+        </p>
+      )}
       <section className="card p-4">
         <h3 className="font-semibold">Use your own photo</h3>
         <p className="mt-1 text-sm text-slate-500">Upload a clear, front-facing photo (PNG, JPG or WebP). We detect the face, can remove the photo background so you stand in the scene, and animate head, eyes and mouth.</p>
@@ -373,6 +379,7 @@ function VoiceTab({ p, set, voices }) {
         {note?.warning && <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">⚠ {note.warning}</p>}
         {note && !note.warning && <p className="mt-2 text-xs text-slate-500">Played with: {note.engine}</p>}
       </div>
+      <p className="text-xs"><Link to="/system" className="text-brand-600 underline">Test which voice engines work on this computer →</Link></p>
       <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">Voices use free Microsoft Edge TTS when the server has internet access. If that is unreachable it falls back to your computer's own voices (male/female), then Google TTS (female only), then espeak. The preview tells you which one was used.</p>
     </div>
   )
@@ -577,7 +584,7 @@ export default function Editor() {
             ))}
           </div>
           {tab === 'script' && <ScriptTab p={p} set={set} assets={assets} onAsset={onAsset} setError={setError} cfg={cfg} sceneIdx={sceneIdx} setSceneIdx={setSceneIdx} gradients={cfg.gradients} sceneries={sceneries} />}
-          {tab === 'avatar' && <AvatarTab p={p} avatars={avatars} assets={assets} onAsset={onAsset} setError={setError} removeAsset={removeAsset} chooseAvatar={chooseAvatar} />}
+          {tab === 'avatar' && <AvatarTab p={p} avatars={avatars} assets={assets} onAsset={onAsset} setError={setError} removeAsset={removeAsset} chooseAvatar={chooseAvatar} faceTracking={cfg.face_tracking} />}
           {tab === 'voice' && <VoiceTab p={p} set={set} voices={voices} />}
           {tab === 'look' && <LookTab p={p} set={set} cfg={cfg} assets={assets} onAsset={onAsset} setError={setError} music={music} sceneries={sceneries} />}
         </div>

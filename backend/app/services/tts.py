@@ -58,7 +58,10 @@ def _edge(text: str, voice: str, speed: float, out: Path) -> None:
     async def run():
         await asyncio.wait_for(edge_tts.Communicate(text, voice, rate=rate).save(str(mp3)), get_settings().tts_timeout_seconds)
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except Exception:  # the Microsoft service occasionally drops a connection: one retry before falling back
+        asyncio.run(run())
     if not mp3.exists() or mp3.stat().st_size < 500:
         raise TTSError("edge-tts returned no audio")
     _to_wav(mp3, out)

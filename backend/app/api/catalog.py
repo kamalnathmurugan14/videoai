@@ -9,7 +9,7 @@ from ..config import get_settings
 from ..deps import client_ip, get_current_user
 from ..models import User
 from ..schemas.misc import ImportText, ImportUrl, VoicePreview
-from ..services import catalog, music, script_import, storage, tts
+from ..services import catalog, landmarks, music, script_import, storage, tts
 
 router = APIRouter(tags=["catalog"])
 _hits: dict[str, deque] = defaultdict(deque)
@@ -32,6 +32,7 @@ def config():
         "limits": {"max_scenes": s.max_scenes, "max_scene_chars": s.max_scene_chars, "max_total_chars": s.max_total_chars,
                    "max_upload_mb": s.max_upload_mb, "daily_renders": s.render_daily_limit_user},
         "llm_enabled": bool(s.anthropic_api_key),
+        "face_tracking": landmarks._interpreters() is not None,
     }
 
 

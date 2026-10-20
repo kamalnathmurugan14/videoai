@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import auth, catalog as catalog_api, media, projects
-from .config import ASSETS_DIR, get_settings
+from .api import auth, catalog as catalog_api, media, projects, system
+from .config import APP_VERSION, ASSETS_DIR, get_settings
 from .services import music, storage
 from .workers.worker import WorkerThread
 
@@ -38,16 +38,16 @@ async def lifespan(app: FastAPI):
         worker.stop_event.set()
 
 
-app = FastAPI(title="VideoAI", version="1.0.0", description="Free AI avatar video creator", lifespan=lifespan)
+app = FastAPI(title="VideoAI", version=APP_VERSION, description="Free AI avatar video creator", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in (auth.router, projects.router, media.router, catalog_api.router):
+for r in (auth.router, projects.router, media.router, catalog_api.router, system.router):
     app.include_router(r, prefix="/api")
 
 
 @app.get("/api/health", tags=["meta"])
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 get_settings().storage_dir.mkdir(parents=True, exist_ok=True)

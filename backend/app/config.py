@@ -58,3 +58,4 @@ def get_settings() -> Settings:
 
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+APP_VERSION = "1.5.0"  # shown in the UI footer and /api/system so you can confirm which build is running

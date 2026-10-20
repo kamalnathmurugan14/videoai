@@ -25,6 +25,8 @@ FACE_SIDE_A, FACE_SIDE_B = 234, 454
 EYE_A = (33, 133, 159, 145, 468)   # outer corner, inner corner, upper lid, lower lid, iris centre
 EYE_B = (263, 362, 386, 374, 473)
 CHEEK_A, CHEEK_B = 205, 425
+UPPER_INNER = (78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308)
+LOWER_INNER = (78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308)
 
 
 @lru_cache(maxsize=1)
@@ -131,10 +133,11 @@ def _mesh(rgb: np.ndarray, face: dict, mesh) -> np.ndarray | None:
     return xy.astype(np.float32)
 
 
-def _best_face(rgb: np.ndarray, det, mesh):
-    """Largest face with landmarks in `rgb` (whole image only)."""
+def _best_face(rgb: np.ndarray, det, mesh, near=None):
+    """Largest face with landmarks in `rgb` (whole image only); with `near`=(x, y), the face closest to that point."""
     faces = _detect_faces(rgb, det)
-    for face in sorted(faces, key=lambda f: -f["w"] * f["h"]):
+    key = (lambda f: -f["w"] * f["h"]) if near is None else (lambda f: (f["cx"] - near[0]) ** 2 + (f["cy"] - near[1]) ** 2)
+    for face in sorted(faces, key=key):
         pts = _mesh(rgb, face, mesh)
         if pts is not None:
             return face, pts
@@ -155,7 +158,7 @@ def _in_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int, det, mesh, sca
     return face, pts
 
 
-def detect_landmarks(rgb: np.ndarray) -> dict | None:
+def detect_landmarks(rgb: np.ndarray, near=None) -> dict | None:
     """Landmarks of the largest face: dict with 'pts' (478x2 source px) and 'score', or None if no face / unavailable.
     Tries the whole image first, then overlapping tiles, then zooms into faces found by a Haar cascade (small faces)."""
     models = _interpreters()
@@ -165,7 +168,7 @@ def detect_landmarks(rgb: np.ndarray) -> dict | None:
     h, w = rgb.shape[:2]
     with _lock:
         try:
-            found = _best_face(rgb, det, mesh)
+            found = _best_face(rgb, det, mesh, near)
             if found is None:  # overlapping tiles at two sizes
                 best = None
                 for frac, n in ((0.6, 2), (0.4, 3)):
@@ -223,5 +226,6 @@ def summarize(lm: dict) -> dict:
     eye_dist = max(1e-6, float(np.hypot(eyes[1][0] - eyes[0][0], eyes[1][1] - eyes[0][1])))
     nose = pt(1)
     yaw = float((nose[0] - (eyes[0][0] + eyes[1][0]) / 2) / eye_dist)  # ~0 for a frontal face, grows as the head turns
-    return {"already_open": already_open, "yaw": yaw, "mouth": mouth, "eyes": eyes, "face_w": face_w, "chin": (float(chin[0]), float(chin[1])),
+    return {"upper_inner": p[list(UPPER_INNER)].copy(), "lower_inner": p[list(LOWER_INNER)].copy(),
+            "already_open": already_open, "yaw": yaw, "mouth": mouth, "eyes": eyes, "face_w": face_w, "chin": (float(chin[0]), float(chin[1])),
             "top": (float(top[0]), float(top[1])), "roll": roll, "cheeks": (pt(CHEEK_A), pt(CHEEK_B))}

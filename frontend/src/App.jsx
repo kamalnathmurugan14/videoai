@@ -7,6 +7,7 @@ import { Login, Signup } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import VideoDetail from './pages/VideoDetail'
+import SystemCheck from './pages/SystemCheck'
 
 function Protected({ children }) {
   const { user, loading } = useAuth()
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
         <Route path="/projects/:id/edit" element={<Protected><Editor /></Protected>} />
         <Route path="/videos/:id" element={<Protected><VideoDetail /></Protected>} />
+        <Route path="/system" element={<SystemCheck />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -55,6 +55,22 @@ cd backend && pip install -r requirements-dev.txt && pytest
 Covers auth, project CRUD/ownership/validation, uploads, daily cap, caption timing, and the render pipeline end to end
 (API → queue → worker → real H.264/AAC MP4). Tests use a built-in synthetic voice, so they need FFmpeg but no network.
 
+## Updating
+
+```powershell
+# Windows (PowerShell), from the project folder, with your virtualenv activated:
+.\update-windows.ps1
+```
+```bash
+# macOS / Linux
+git fetch origin main && git reset --hard origin/main
+(cd backend && pip install -r requirements.txt) && (cd frontend && npm install)
+```
+Then restart the backend and frontend. Open **http://localhost:5173/system** (or the *System check* link in the footer)
+to confirm the version, that precise face tracking / the person cut-out model are active, and to test which voice
+engines work on your computer. `git reset --hard` discards local edits to tracked files (typically a `package-lock.json`
+changed by `npm install`, which otherwise makes `git pull` refuse to update); your `.env`, database and media are kept.
+
 ## Run with Docker Compose
 
 ```bash
@@ -118,8 +134,10 @@ AVATAR_COMMAND=python /opt/sadtalker/inference.py --source_image {image} --drive
   upright first, tiny faces in wide shots are found by scanning tiles / zooming in. If that runtime is unavailable it
   falls back to OpenCV Haar cascades + proportions (less precise); when no face is found, or the head is strongly
   turned/tilted, the editor warns you. It works best with a clear, front-facing photo. The mouth position comes from the detected face
-  box; use the **Fine-tune the mouth** sliders in the Avatar tab to line it up exactly with the lip seam. Background removal uses GrabCut (good for plain
-  backdrops, rough on busy ones; untick "Remove photo background" to keep the original). Plug in SadTalker/Wav2Lip via
+  box; use the **Fine-tune the mouth** sliders in the Avatar tab to line it up exactly with the lip seam. Background removal uses MediaPipe's person-segmentation model (keeps
+  hair, shoulders and clothes, removes busy backgrounds and other people), sharpened with GrabCut; untick
+  "Remove photo background" to keep the original. Smiling photos (teeth showing) are first warped to a closed-lip smile
+  so the animation opens the mouth naturally along the real lip curve. Plug in SadTalker/Wav2Lip via
   `AVATAR_PROVIDER=command` for true lip-sync.
 - **Voices need internet** for edge-tts (best quality, picks the exact voice). If it fails the app falls back to your
   computer's own voices via pyttsx3 (Windows SAPI5 / macOS; picks a male or female voice), then Google TTS (a single

@@ -8,7 +8,7 @@ def test_catalogs(client):
     assert len(client.get("/api/voices").json()) > 10
     assert {t["id"] for t in client.get("/api/templates").json()} >= {"explainer", "social-promo", "product-intro"}
     assert client.get("/health").status_code in (200, 404)
-    assert client.get("/api/health").json() == {"status": "ok"}
+    assert client.get("/api/health").json()["status"] == "ok"
 
 
 def test_crud(client, auth):
@@ -148,3 +148,12 @@ def test_fine_tune_mouth(client, auth, other_auth):
     assert client.get("/api/media?kind=avatar", headers=auth).json()[0]["mouth"] == [0.5, 0.62, 0.2]
     assert client.put(f"/api/media/{a['id']}/mouth", headers=auth, json={"x": 0.5, "y": 2, "width": 0.2}).status_code == 422
     assert client.put(f"/api/media/{a['id']}/mouth", headers=other_auth, json={"x": 0.5, "y": 0.6, "width": 0.2}).status_code == 404
+
+
+def test_system_check(client, auth):
+    info = client.get("/api/system").json()
+    assert info["version"] and isinstance(info["face_tracking"], bool) and isinstance(info["segmentation"], bool)
+    assert info["ffmpeg"] and info["tts_order"] == ["synthetic"]
+    r = client.post("/api/system/voice-check", headers=auth).json()
+    assert r["engines"] == [{"engine": "synthetic", "ok": True, "seconds": r["engines"][0]["seconds"], "error": None}]
+    assert client.post("/api/system/voice-check").status_code == 401

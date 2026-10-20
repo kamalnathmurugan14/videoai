@@ -66,3 +66,23 @@ def test_background_removal_keeps_the_whole_head(astronaut):
     ex = meta["eyes"][0][0] * face.CANVAS, meta["eyes"][1][0] * face.CANVAS
     top_rows = alpha[int(0.02 * face.CANVAS): int(0.2 * face.CANVAS), int(ex[0]): int(ex[1])]
     assert meta["cutout"] and top_rows.mean() > 0.5  # hair / top of the head is opaque, not clipped flat
+
+
+def test_smiling_photo_is_closed_before_animating(astronaut):
+    """The astronaut smiles with teeth showing: the avatar canvas should get a closed-lip mouth and a seam curve."""
+    canvas, meta = face.build_avatar(astronaut, True, "female")
+    assert meta["closed_by_warp"] is True and meta["open"] is False
+    assert len(meta["seam"]) >= 5
+    xs = [p[0] for p in meta["seam"]]
+    assert min(xs) < meta["mouth"][0] < max(xs)  # opening is centred on the inner-lip line
+    lm = landmarks.detect_landmarks(np.asarray(Image.alpha_composite(Image.new("RGBA", canvas.size, (128, 128, 128, 255)), canvas).convert("RGB")))
+    assert lm is not None and landmarks.summarize(lm)["already_open"] is False  # teeth gone: the mesh now sees a closed mouth
+
+
+def test_segmentation_keeps_shoulders(astronaut):
+    canvas, meta = face.build_avatar(astronaut, True, "female")
+    alpha = np.asarray(canvas.getchannel("A")).astype(float) / 255
+    C = face.CANVAS
+    chin = int(meta["chin"] * C)
+    below = alpha[min(C - 1, chin + int(0.12 * C)): min(C, chin + int(0.2 * C)), int(0.15 * C): int(0.85 * C)]
+    assert below.mean() > 0.5  # suit/shoulders under the chin are kept (GrabCut alone used to drop them)

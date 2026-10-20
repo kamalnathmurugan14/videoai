@@ -117,14 +117,15 @@ def lens_profile(us: np.ndarray, mouth_w: float, fw: float, size: int) -> np.nda
     return np.clip(1 - np.abs(us) ** 2.2, 0, 1) ** 0.62
 
 
-def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height: float, a: float, fw: float, size: int) -> None:
+def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height: float, a: float, fw: float, size: int,
+                    top_offset=None) -> None:
     """Inner mouth for photos. Fills exactly the gap the jaw warp opens below the lip seam (cx, cy): shaded cavity,
     upper teeth, tongue when wide, and a wet lower-lip highlight. Supersampled + feathered to blend with the photo."""
     if height < 2.0:
         return
     ss = 3
     half = width * 0.5
-    pad = int(width * 0.2) + 6
+    pad = int(width * 0.35) + 6
     pw, ph = int(width + pad * 2), int(height + pad * 2 + 8)
     n = 64
     us = np.linspace(-1, 1, n)
@@ -132,8 +133,9 @@ def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height
     oy = pad * ss
     ox = pw * ss / 2
     xs = ox + us * half * ss
-    top = [(x, oy - 0.6 * ss) for x in xs]
-    bot = [(x, oy + height * ss * v) for x, v in zip(xs[::-1], prof[::-1])]
+    toff = np.zeros(n) if top_offset is None else np.array([top_offset(float(u)) for u in us])  # px, follows the lip curve
+    top = [(x, oy - 0.6 * ss + t * ss) for x, t in zip(xs, toff)]
+    bot = [(x, oy + (t + height * v) * ss) for x, v, t in zip(xs[::-1], prof[::-1], toff[::-1])]
     shape = top + bot
     W, H = pw * ss, ph * ss
     cav = Image.new("L", (W, H), 0)
@@ -158,7 +160,7 @@ def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height
                 continue
             for k in range(int(hh)):
                 shade = 1 - 0.55 * (k / max(1.0, hh)) ** 1.3
-                d.line([(x0, oy + k), (x1, oy + k)], fill=(int(176 * shade), int(166 * shade), int(152 * shade), int(225 * shade + 10)))
+                d.line([(x0, oy + toff[j] * ss + k), (x1, oy + toff[j + 1] * ss + k)], fill=(int(176 * shade), int(166 * shade), int(152 * shade), int(225 * shade + 10)))
     if a > 0.75 and height > width * 0.14:  # tongue, dark and soft
         d.ellipse([ox - half * 0.38 * ss, oy + height * 0.52 * ss, ox + half * 0.38 * ss, oy + height * 0.92 * ss], fill=(118, 46, 56, 215))
     feat = feat.filter(ImageFilter.GaussianBlur(0.9 * ss))
@@ -184,7 +186,7 @@ class AvatarProvider(ABC):
 
 
 def _sstep(a: float, b: float, x: np.ndarray) -> np.ndarray:
-    t = np.clip((x - a) / max(b - a, 1e-6), 0, 1)
+    t = np.clip((x - a) / np.maximum(b - a, 1e-6), 0, 1)
     return t * t * (3 - 2 * t)
 
 
@@ -222,7 +224,13 @@ class PuppetAvatarProvider(AvatarProvider):
         # jaw drop (photos): everything below the lip seam shifts down as a block; narrow near the mouth (so the gap is
         # lens-shaped and tapers to the lip corners), plus a softer wide term so the whole chin follows
         if p["jaw"] > 0 and not m["has_mouth_art"]:
-            below = _sstep(my, my + 0.004, y) * (1.0 - _sstep(chin - 0.01, chin + 0.07, y))
+            seam_y = my
+            if m.get("seam"):  # follow the real lip line (smiles curve up at the corners)
+                sx, sy = zip(*m["seam"])
+                seam_y = np.interp(x, sx, sy)
+                outside = (x < min(sx)) | (x > max(sx))  # beyond the lip corners never start above the lip centre
+                seam_y = np.where(outside, np.maximum(seam_y, my + 0.004), seam_y)
+            below = _sstep(seam_y, seam_y + 0.004, y) * (1.0 - _sstep(chin - 0.01, chin + 0.07, y))
             narrow = np.exp(-0.5 * ((x - mx) / (fw * 0.20)) ** 2)
             wide = np.exp(-0.5 * ((x - mx) / (fw * 0.45)) ** 2)
             dy = dy + below * p["jaw"] * (0.75 * narrow + 0.25 * wide)
@@ -298,7 +306,13 @@ class PuppetAvatarProvider(AvatarProvider):
             cx, cy = moved(mx, my)
             if photo:
                 h_px = a * jaw_max * size + 0.004 * size * (1 if a > 0.02 else 0)  # exactly the gap the warp opens
-                draw_open_mouth(frame, cx, cy, mw * size * (1.0 - 0.10 * a), h_px, a, m["face_w"], size)
+                width_px = mw * size * (1.0 - 0.10 * a)
+                off = None
+                if m.get("seam"):
+                    sx, sy = zip(*m["seam"])
+                    base_y = float(np.interp(mx, sx, sy))
+                    off = lambda u, w=width_px: (float(np.interp(mx + u * w / 2 / size, sx, sy)) - base_y) * size
+                draw_open_mouth(frame, cx, cy, width_px, h_px, a, m["face_w"], size, off)
             else:
                 draw_mouth(frame, cx, cy, mw * size, a)
             if closed > 0 and m["eyes"]:
