@@ -1,0 +1,35 @@
+"""Image upload handling: validate with Pillow and re-encode (strips metadata / polyglot payloads)."""
+import io
+
+from fastapi import HTTPException
+from PIL import Image, ImageOps, UnidentifiedImageError
+
+from ..config import get_settings
+from . import storage
+
+Image.MAX_IMAGE_PIXELS = 40_000_000
+
+
+def save_image(data: bytes, kind: str) -> tuple[str, int, int]:
+    """Returns (filename, width, height). Avatars keep alpha (PNG); other images become JPEG/PNG."""
+    s = get_settings()
+    if len(data) > s.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"File too large (max {s.max_upload_mb} MB)")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        raise HTTPException(400, "Not a valid image (use PNG, JPEG or WebP)")
+    if img.format not in ("PNG", "JPEG", "WEBP"):
+        raise HTTPException(400, "Unsupported image type (use PNG, JPEG or WebP)")
+    img = ImageOps.exif_transpose(img)
+    limit = 1600 if kind == "image" else 1024
+    img.thumbnail((limit, limit))
+    name = storage.new_id()
+    if kind == "avatar" or img.mode in ("RGBA", "LA", "P"):
+        filename = f"{name}.png"
+        img.convert("RGBA").save(storage.subdir("uploads") / filename, "PNG")
+    else:
+        filename = f"{name}.jpg"
+        img.convert("RGB").save(storage.subdir("uploads") / filename, "JPEG", quality=88)
+    return filename, img.width, img.height

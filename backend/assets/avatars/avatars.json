@@ -1,0 +1,141 @@
+[
+  {
+    "id": "aria",
+    "name": "Aria",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#f1c7a5",
+    "eyes": [
+      [
+        0.40625,
+        0.400390625,
+        0.03
+      ],
+      [
+        0.59375,
+        0.400390625,
+        0.03
+      ]
+    ],
+    "has_mouth_art": true,
+    "image": "aria.png",
+    "preview": "aria_preview.png"
+  },
+  {
+    "id": "leo",
+    "name": "Leo",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#c68a63",
+    "eyes": [
+      [
+        0.40625,
+        0.400390625,
+        0.03
+      ],
+      [
+        0.59375,
+        0.400390625,
+        0.03
+      ]
+    ],
+    "has_mouth_art": true,
+    "image": "leo.png",
+    "preview": "leo_preview.png"
+  },
+  {
+    "id": "maya",
+    "name": "Maya",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#8d5a3b",
+    "eyes": [
+      [
+        0.40625,
+        0.400390625,
+        0.03
+      ],
+      [
+        0.59375,
+        0.400390625,
+        0.03
+      ]
+    ],
+    "has_mouth_art": true,
+    "image": "maya.png",
+    "preview": "maya_preview.png"
+  },
+  {
+    "id": "sam",
+    "name": "Sam",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#f6d5b8",
+    "eyes": [
+      [
+        0.40625,
+        0.400390625,
+        0.03
+      ],
+      [
+        0.59375,
+        0.400390625,
+        0.03
+      ]
+    ],
+    "has_mouth_art": true,
+    "image": "sam.png",
+    "preview": "sam_preview.png"
+  },
+  {
+    "id": "noor",
+    "name": "Noor",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#d9a273",
+    "eyes": [
+      [
+        0.40625,
+        0.400390625,
+        0.03
+      ],
+      [
+        0.59375,
+        0.400390625,
+        0.03
+      ]
+    ],
+    "has_mouth_art": true,
+    "image": "noor.png",
+    "preview": "noor_preview.png"
+  },
+  {
+    "id": "robo",
+    "name": "Robo",
+    "mouth": [
+      0.5,
+      0.5859375,
+      0.17
+    ],
+    "skin": "#cbd5e1",
+    "eyes": null,
+    "has_mouth_art": true,
+    "image": "robo.png",
+    "preview": "robo_preview.png"
+  }
+]

@@ -1,0 +1,30 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# node
+node_modules/
+frontend/dist/
+
+# generated at runtime (media, db, music) — never commit
+backend/storage/
+storage/
+*.db
+*.sqlite3
+*.mp4
+*.mp3
+*.wav
+!backend/assets/**/*.wav
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/

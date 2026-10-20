@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: videoai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-videoai}
+      POSTGRES_DB: videoai
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videoai"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: [{ path: .env, required: false }]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://videoai:${POSTGRES_PASSWORD:-videoai}@db:5432/videoai
+      STORAGE_DIR: /data/storage
+      TRUST_PROXY: "true"
+    depends_on:
+      db: { condition: service_healthy }
+    volumes: [storage:/data/storage]
+
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["8080:80"]
+
+volumes:
+  pgdata:
+  storage:
