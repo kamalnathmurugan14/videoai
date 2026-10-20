@@ -5,13 +5,12 @@ from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from ..config import get_settings
-from . import storage
+from . import face, storage
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
 
-def save_image(data: bytes, kind: str) -> tuple[str, int, int]:
-    """Returns (filename, width, height). Avatars keep alpha (PNG); other images become JPEG/PNG."""
+def _open(data: bytes) -> Image.Image:
     s = get_settings()
     if len(data) > s.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"File too large (max {s.max_upload_mb} MB)")
@@ -22,14 +21,28 @@ def save_image(data: bytes, kind: str) -> tuple[str, int, int]:
         raise HTTPException(400, "Not a valid image (use PNG, JPEG or WebP)")
     if img.format not in ("PNG", "JPEG", "WEBP"):
         raise HTTPException(400, "Unsupported image type (use PNG, JPEG or WebP)")
-    img = ImageOps.exif_transpose(img)
-    limit = 1600 if kind == "image" else 1024
-    img.thumbnail((limit, limit))
+    return ImageOps.exif_transpose(img)
+
+
+def save_image(data: bytes) -> tuple[str, int, int]:
+    """Scene/background image. Returns (filename, width, height)."""
+    img = _open(data)
+    img.thumbnail((1600, 1600))
     name = storage.new_id()
-    if kind == "avatar" or img.mode in ("RGBA", "LA", "P"):
+    if img.mode in ("RGBA", "LA", "P"):
         filename = f"{name}.png"
         img.convert("RGBA").save(storage.subdir("uploads") / filename, "PNG")
     else:
         filename = f"{name}.jpg"
         img.convert("RGB").save(storage.subdir("uploads") / filename, "JPEG", quality=88)
     return filename, img.width, img.height
+
+
+def save_avatar(data: bytes, remove_bg: bool, gender: str) -> tuple[str, int, int, dict]:
+    """Photo -> normalised avatar canvas with detected landmarks. Returns (filename, w, h, meta)."""
+    img = _open(data)
+    canvas, meta = face.build_avatar(img, remove_bg, gender)
+    name = storage.new_id()
+    filename = f"{name}.png"
+    canvas.save(storage.subdir("uploads") / filename, "PNG", optimize=True)
+    return filename, canvas.width, canvas.height, meta

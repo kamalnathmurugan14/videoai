@@ -5,8 +5,12 @@ import { ASPECT_CSS, ErrorBox, Modal, PageLoader, Spinner } from '../components/
 
 const TABS = [['script', '1 · Script'], ['avatar', '2 · Avatar'], ['voice', '3 · Voice'], ['look', '4 · Look & feel']]
 
-const bgCss = (bg, assets) => {
+const bgCss = (bg, assets, sceneries = []) => {
   if (!bg) return undefined
+  if (bg.type === 'scenery') {
+    const s = sceneries.find((x) => x.id === bg.scenery_id)
+    return s ? { backgroundImage: `url(${mediaUrl(s.url)})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: '#334155' }
+  }
   if (bg.type === 'color') return { background: bg.color }
   if (bg.type === 'image') {
     const a = assets.find((x) => x.id === bg.asset_id)
@@ -16,7 +20,7 @@ const bgCss = (bg, assets) => {
 }
 
 /* ---------- reusable bits ---------- */
-function UploadButton({ kind, label, onUploaded, setError, className = 'btn-secondary' }) {
+function UploadButton({ kind, label, onUploaded, setError, extra, className = 'btn-secondary' }) {
   const ref = useRef()
   const [busy, setBusy] = useState(false)
   const pick = async (e) => {
@@ -24,7 +28,7 @@ function UploadButton({ kind, label, onUploaded, setError, className = 'btn-seco
     e.target.value = ''
     if (!file) return
     setBusy(true)
-    try { onUploaded(await api.uploadAsset(file, kind)) } catch (err) { setError(err.message) } finally { setBusy(false) }
+    try { onUploaded(await api.uploadAsset(file, kind, extra)) } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
   return (
     <>
@@ -36,18 +40,29 @@ function UploadButton({ kind, label, onUploaded, setError, className = 'btn-seco
   )
 }
 
-function BackgroundPicker({ value, onChange, assets, onAsset, gradients, setError, allowInherit }) {
+function BackgroundPicker({ value, onChange, assets, onAsset, gradients, setError, allowInherit, sceneries = [] }) {
   const type = value ? value.type : 'inherit'
   const v = value || { type: 'gradient', color: '#4f46e5', color2: '#9333ea', asset_id: null }
   const imgs = assets.filter((a) => a.kind === 'image')
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        {[...(allowInherit ? [['inherit', 'Default']] : []), ['gradient', 'Gradient'], ['color', 'Solid'], ['image', 'Image']].map(([t, l]) => (
-          <button key={t} type="button" onClick={() => onChange(t === 'inherit' ? null : { ...v, type: t })}
+        {[...(allowInherit ? [['inherit', 'Default']] : []), ['scenery', 'Scenery'], ['gradient', 'Gradient'], ['color', 'Solid'], ['image', 'Image']].map(([t, l]) => (
+          <button key={t} type="button" onClick={() => onChange(t === 'inherit' ? null : t === 'scenery' ? { ...v, type: 'scenery', scenery_id: v.scenery_id || sceneries[0]?.id } : { ...v, type: t })}
             className={`rounded-full border px-3 py-1 text-sm ${type === t ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-slate-300 hover:bg-slate-50'}`}>{l}</button>
         ))}
       </div>
+      {type === 'scenery' && (
+        <div className="grid grid-cols-4 gap-2">
+          {sceneries.map((s) => (
+            <button key={s.id} type="button" title={s.name} aria-label={s.name} aria-pressed={v.scenery_id === s.id} onClick={() => onChange({ ...v, type: 'scenery', scenery_id: s.id })}
+              className={`overflow-hidden rounded-lg border-2 ${v.scenery_id === s.id ? 'border-brand-600' : 'border-transparent hover:border-slate-300'}`}>
+              <img src={mediaUrl(s.url)} alt={s.name} loading="lazy" className="aspect-video w-full object-cover" />
+              <span className="block truncate bg-white px-1 py-0.5 text-[11px]">{s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {type === 'gradient' && (
         <div className="flex flex-wrap items-center gap-2">
           {gradients.map(([a, b]) => (
@@ -75,7 +90,7 @@ function BackgroundPicker({ value, onChange, assets, onAsset, gradients, setErro
 }
 
 /* ---------- live preview ---------- */
-function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset }) {
+function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset, sceneries }) {
   const scene = p.scenes[sceneIdx]
   const bg = scene?.background || p.background
   const words = (scene?.text || 'Your captions appear here').split(/\s+/).slice(0, 6)
@@ -84,7 +99,7 @@ function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset }) {
   const capClass = p.caption_style === 'classic' ? 'bg-slate-900/80 text-white rounded-lg px-3 py-1'
     : p.caption_style === 'minimal' ? 'text-white [text-shadow:0_2px_4px_rgba(0,0,0,.6)]' : 'text-white [-webkit-text-stroke:2px_black] [paint-order:stroke_fill]'
   return (
-    <div className={`relative mx-auto w-full overflow-hidden rounded-xl shadow-lg ${portrait ? 'max-w-[260px]' : ''}`} style={{ aspectRatio: ASPECT_CSS[p.aspect_ratio], ...bgCss(bg, assets) }}>
+    <div className={`relative mx-auto w-full overflow-hidden rounded-xl shadow-lg ${portrait ? 'max-w-[260px]' : ''}`} style={{ aspectRatio: ASPECT_CSS[p.aspect_ratio], ...bgCss(bg, assets, sceneries) }}>
       {mediaAsset && (
         <img src={mediaUrl(mediaAsset.url)} alt="" className={`absolute rounded-lg bg-white/10 object-contain shadow-lg ${sideBySide ? 'left-[5%] top-[12%] h-[62%] w-[47%]' : 'left-[7%] top-[6%] h-[34%] w-[86%]'}`} />
       )}
@@ -104,7 +119,7 @@ function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset }) {
 }
 
 /* ---------- tabs ---------- */
-function ScriptTab({ p, set, assets, onAsset, setError, cfg, sceneIdx, setSceneIdx, gradients }) {
+function ScriptTab({ p, set, assets, onAsset, setError, cfg, sceneIdx, setSceneIdx, gradients, sceneries }) {
   const [showImport, setShowImport] = useState(false)
   const updScene = (i, patch) => set({ scenes: p.scenes.map((s, j) => (j === i ? { ...s, ...patch } : s)) })
   const move = (i, d) => {
@@ -120,7 +135,11 @@ function ScriptTab({ p, set, assets, onAsset, setError, cfg, sceneIdx, setSceneI
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-500">{p.scenes.length} scene{p.scenes.length === 1 ? '' : 's'} · {total} characters</p>
-        <button className="btn-secondary !py-1.5" onClick={() => setShowImport(true)}>✨ Import from text / URL</button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary !py-1.5" disabled={!sceneries.length} title="Give every scene a different background scenery"
+            onClick={() => set({ scenes: p.scenes.map((s, i) => ({ ...s, background: { type: 'scenery', color: '#4f46e5', color2: '#9333ea', asset_id: null, scenery_id: sceneries[i % sceneries.length].id } })) })}>🎞 Vary scenery per scene</button>
+          <button className="btn-secondary !py-1.5" onClick={() => setShowImport(true)}>✨ Import from text / URL</button>
+        </div>
       </div>
       {p.scenes.map((s, i) => {
         const media = assets.find((a) => a.id === s.media_asset_id)
@@ -140,7 +159,7 @@ function ScriptTab({ p, set, assets, onAsset, setError, cfg, sceneIdx, setSceneI
             <details className="mt-2 text-sm">
               <summary className="cursor-pointer text-slate-500">Scene background & image</summary>
               <div className="mt-3 space-y-3">
-                <BackgroundPicker allowInherit value={s.background} onChange={(b) => updScene(i, { background: b })} assets={assets} onAsset={onAsset} gradients={gradients} setError={setError} />
+                <BackgroundPicker allowInherit value={s.background} onChange={(b) => updScene(i, { background: b })} assets={assets} onAsset={onAsset} gradients={gradients} setError={setError} sceneries={sceneries} />
                 <div className="flex items-center gap-3">
                   {media && <img src={mediaUrl(media.url)} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                   <UploadButton kind="image" label={media ? 'Replace image' : 'Add image to scene'} setError={setError} onUploaded={(a) => { onAsset(a); updScene(i, { media_asset_id: a.id }) }} />
@@ -208,15 +227,18 @@ function ImportModal({ onClose, onApply, cfg }) {
   )
 }
 
-function AvatarTab({ p, set, avatars, assets, onAsset, setError, removeAsset }) {
+function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseAvatar }) {
   const mine = assets.filter((a) => a.kind === 'avatar')
-  const Tile = ({ id, url, name, onDelete }) => (
+  const [gender, setGender] = useState('female')
+  const [removeBg, setRemoveBg] = useState(true)
+  const Tile = ({ id, url, name, gender: g, warn, onDelete }) => (
     <div className="relative">
-      <button type="button" onClick={() => set({ avatar_id: id })} aria-pressed={p.avatar_id === id}
+      <button type="button" onClick={() => chooseAvatar(id, g)} aria-pressed={p.avatar_id === id}
         className={`block w-full overflow-hidden rounded-xl border-2 bg-gradient-to-br from-brand-100 to-slate-100 p-1 ${p.avatar_id === id ? 'border-brand-600 shadow-md' : 'border-transparent hover:border-slate-300'}`}>
         <img src={mediaUrl(url)} alt={name} className="aspect-square w-full object-contain" />
-        <span className="block truncate pb-1 text-center text-sm font-medium">{name}</span>
+        <span className="block truncate pb-1 text-center text-sm font-medium">{name}{g ? ` · ${g}` : ''}</span>
       </button>
+      {warn && <span title={warn} className="absolute left-1 top-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700 shadow">⚠ no face found</span>}
       {onDelete && <button onClick={onDelete} aria-label="Delete upload" className="absolute right-1 top-1 rounded-full bg-white/90 px-1.5 text-red-600 shadow">×</button>}
     </div>
   )
@@ -224,16 +246,24 @@ function AvatarTab({ p, set, avatars, assets, onAsset, setError, removeAsset }) 
     <div className="space-y-6">
       <section>
         <h3 className="mb-3 font-semibold">Choose a presenter</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{avatars.map((a) => <Tile key={a.id} id={a.id} url={a.url} name={a.name} />)}</div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{avatars.map((a) => <Tile key={a.id} id={a.id} url={a.url} name={a.name} gender={a.gender} />)}</div>
       </section>
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold">Your own image</h3>
-          <UploadButton kind="avatar" label="Upload image" setError={setError} onUploaded={(a) => { onAsset(a); set({ avatar_id: `asset:${a.id}` }) }} />
+      <section className="card p-4">
+        <h3 className="font-semibold">Use your own photo</h3>
+        <p className="mt-1 text-sm text-slate-500">Upload a clear, front-facing photo (PNG, JPG or WebP). We detect the face, can remove the photo background so you stand in the scene, and animate head, eyes and mouth.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+          <label className="flex items-center gap-2">Voice type
+            <select className="input !w-auto !py-1" value={gender} onChange={(e) => setGender(e.target.value)} aria-label="Voice type for this photo">
+              <option value="female">Female</option><option value="male">Male</option>
+            </select>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-brand-600" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} /> Remove photo background</label>
+          <UploadButton kind="avatar" label="Upload photo" extra={{ gender, remove_bg: removeBg }} setError={setError} onUploaded={(a) => { onAsset(a); chooseAvatar(`asset:${a.id}`, a.gender) }} />
         </div>
-        {mine.length === 0 ? <p className="text-sm text-slate-500">Upload a front-facing portrait (PNG, JPG, WebP). The jaw is animated automatically — it works best with the mouth around 2/3 down the image and a neutral expression.</p> : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {mine.map((a) => <Tile key={a.id} id={`asset:${a.id}`} url={a.url} name={a.name || 'Upload'} onDelete={() => removeAsset(a)} />)}
+        {mine.length > 0 && (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {mine.map((a) => <Tile key={a.id} id={`asset:${a.id}`} url={a.url} name={a.name || 'Upload'} gender={a.gender}
+              warn={a.face_found === false ? 'No face was detected, so the mouth position is a guess. Try a clearer front-facing photo.' : null} onDelete={() => removeAsset(a)} />)}
           </div>
         )}
       </section>
@@ -242,20 +272,23 @@ function AvatarTab({ p, set, avatars, assets, onAsset, setError, removeAsset }) 
 }
 
 function VoiceTab({ p, set, voices }) {
+  const [filter, setFilter] = useState('all')
+  const [note, setNote] = useState(null)
   const [text, setText] = useState('Hello! This is how I will sound in your video.')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const audio = useRef()
   const groups = useMemo(() => {
     const g = {}
-    voices.forEach((v) => (g[v.language] ||= []).push(v))
+    voices.filter((v) => filter === 'all' || v.gender === filter || v.id === p.voice).forEach((v) => (g[v.language] ||= []).push(v))
     return g
-  }, [voices])
+  }, [voices, filter, p.voice])
   const preview = async () => {
     setBusy(true)
     setError('')
     try {
-      const { url } = await api.previewVoice(p.voice, text, p.speed)
+      const { url, warning, engine } = await api.previewVoice(p.voice, text, p.speed)
+      setNote({ warning, engine })
       audio.current.src = mediaUrl(url)
       await audio.current.play()
     } catch (e) { setError(e.message) } finally { setBusy(false) }
@@ -263,7 +296,14 @@ function VoiceTab({ p, set, voices }) {
   return (
     <div className="space-y-5">
       <div>
-        <label className="label" htmlFor="voice">Voice & language</label>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="label !mb-0" htmlFor="voice">Voice & language</label>
+          <div className="flex gap-1 text-xs">
+            {['all', 'female', 'male'].map((g) => (
+              <button key={g} type="button" onClick={() => setFilter(g)} className={`rounded-full border px-2.5 py-0.5 capitalize ${filter === g ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700' : 'border-slate-300'}`}>{g}</button>
+            ))}
+          </div>
+        </div>
         <select id="voice" className="input" value={p.voice} onChange={(e) => set({ voice: e.target.value })}>
           {Object.entries(groups).map(([lang, vs]) => (
             <optgroup key={lang} label={lang}>{vs.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.gender})</option>)}</optgroup>
@@ -280,13 +320,15 @@ function VoiceTab({ p, set, voices }) {
         <button className="btn-secondary mt-2" disabled={busy || !text.trim()} onClick={preview}>{busy ? <Spinner className="h-4 w-4" /> : '🔊'} Preview voice</button>
         <audio ref={audio} hidden />
         <div className="mt-2"><ErrorBox>{error}</ErrorBox></div>
+        {note?.warning && <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">⚠ {note.warning}</p>}
+        {note && !note.warning && <p className="mt-2 text-xs text-slate-500">Played with: {note.engine}</p>}
       </div>
-      <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">Voices use free Microsoft Edge TTS when the server has internet access, falling back to Google TTS, then an offline engine (voice quality and language coverage of the fallbacks are limited).</p>
+      <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">Voices use free Microsoft Edge TTS when the server has internet access. If that is unreachable it falls back to your computer's own voices (male/female), then Google TTS (female only), then espeak. The preview tells you which one was used.</p>
     </div>
   )
 }
 
-function LookTab({ p, set, cfg, assets, onAsset, setError, music }) {
+function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
   const audio = useRef()
   const playTrack = (t) => { audio.current.src = mediaUrl(t.url); audio.current.play() }
   return (
@@ -305,7 +347,22 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music }) {
       </section>
       <section>
         <h3 className="mb-2 font-semibold">Default background</h3>
-        <BackgroundPicker value={p.background} onChange={(b) => set({ background: b })} assets={assets} onAsset={onAsset} gradients={cfg?.gradients || []} setError={setError} />
+        <BackgroundPicker value={p.background} onChange={(b) => set({ background: b })} assets={assets} onAsset={onAsset} gradients={cfg?.gradients || []} setError={setError} sceneries={sceneries} />
+        <p className="mt-2 text-xs text-slate-500">Each scene can override this in the Script tab, or use “Vary scenery per scene”.</p>
+      </section>
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-semibold">Intro</h3>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={p.intro_enabled} onChange={(e) => set({ intro_enabled: e.target.checked })} /> Show intro title
+          </label>
+        </div>
+        {p.intro_enabled && (
+          <>
+            <input className="input" maxLength={120} placeholder={p.title} value={p.intro_title || ''} onChange={(e) => set({ intro_title: e.target.value })} aria-label="Intro title" />
+            <p className="mt-1 text-xs text-slate-500">A short title card while the presenter walks in, before they start speaking (about 2 seconds).</p>
+          </>
+        )}
       </section>
       <section>
         <div className="mb-2 flex items-center justify-between">
@@ -364,10 +421,11 @@ export default function Editor() {
   const [voices, setVoices] = useState([])
   const [music, setMusic] = useState([])
   const [assets, setAssets] = useState([])
+  const [sceneries, setSceneries] = useState([])
 
   useEffect(() => {
-    Promise.all([api.getProject(id), api.config(), api.avatars(), api.voices(), api.music(), api.listAssets()])
-      .then(([proj, c, a, v, m, as]) => { setP(proj); setCfg(c); setAvatars(a); setVoices(v); setMusic(m); setAssets(as) })
+    Promise.all([api.getProject(id), api.config(), api.avatars(), api.voices(), api.music(), api.listAssets(), api.sceneries()])
+      .then(([proj, c, a, v, m, as, sc]) => { setP(proj); setCfg(c); setAvatars(a); setVoices(v); setMusic(m); setAssets(as); setSceneries(sc) })
       .catch((e) => setError(e.message))
   }, [id])
 
@@ -388,11 +446,22 @@ export default function Editor() {
     } catch (e) { setError(e.message) }
   }
 
+  // picking an avatar also switches to a voice of the matching gender (same locale when possible)
+  const chooseAvatar = (avatarId, gender) => {
+    const patch = { avatar_id: avatarId }
+    const cur = voices.find((v) => v.id === p.voice)
+    if (gender && cur && cur.gender !== gender) {
+      const alt = voices.find((v) => v.gender === gender && v.id.slice(0, 5) === p.voice.slice(0, 5)) || voices.find((v) => v.gender === gender)
+      if (alt) patch.voice = alt.id
+    }
+    set(patch)
+  }
+
   const save = async () => {
     const body = {
       title: p.title, aspect_ratio: p.aspect_ratio, avatar_id: p.avatar_id, voice: p.voice, speed: p.speed,
       captions_enabled: p.captions_enabled, caption_style: p.caption_style, music_volume: p.music_volume,
-      background: p.background, clear_music: !p.music_id, music_id: p.music_id || undefined,
+      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', clear_music: !p.music_id, music_id: p.music_id || undefined,
       scenes: p.scenes.map((s) => ({ text: s.text, background: s.background, media_asset_id: s.media_asset_id })),
     }
     const saved = await api.updateProject(id, body)
@@ -450,15 +519,15 @@ export default function Editor() {
                 className={`flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${tab === k ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{l}</button>
             ))}
           </div>
-          {tab === 'script' && <ScriptTab p={p} set={set} assets={assets} onAsset={onAsset} setError={setError} cfg={cfg} sceneIdx={sceneIdx} setSceneIdx={setSceneIdx} gradients={cfg.gradients} />}
-          {tab === 'avatar' && <AvatarTab p={p} set={set} avatars={avatars} assets={assets} onAsset={onAsset} setError={setError} removeAsset={removeAsset} />}
+          {tab === 'script' && <ScriptTab p={p} set={set} assets={assets} onAsset={onAsset} setError={setError} cfg={cfg} sceneIdx={sceneIdx} setSceneIdx={setSceneIdx} gradients={cfg.gradients} sceneries={sceneries} />}
+          {tab === 'avatar' && <AvatarTab p={p} avatars={avatars} assets={assets} onAsset={onAsset} setError={setError} removeAsset={removeAsset} chooseAvatar={chooseAvatar} />}
           {tab === 'voice' && <VoiceTab p={p} set={set} voices={voices} />}
-          {tab === 'look' && <LookTab p={p} set={set} cfg={cfg} assets={assets} onAsset={onAsset} setError={setError} music={music} />}
+          {tab === 'look' && <LookTab p={p} set={set} cfg={cfg} assets={assets} onAsset={onAsset} setError={setError} music={music} sceneries={sceneries} />}
         </div>
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className="card p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Preview · scene {Math.min(sceneIdx, p.scenes.length - 1) + 1} (approximate)</p>
-            <Preview p={p} avatarUrl={avatarUrl} assets={assets} sceneIdx={Math.min(sceneIdx, p.scenes.length - 1)} mediaAsset={mediaAsset} />
+            <Preview p={p} avatarUrl={avatarUrl} assets={assets} sceneIdx={Math.min(sceneIdx, p.scenes.length - 1)} mediaAsset={mediaAsset} sceneries={sceneries} />
             <p className="mt-3 text-xs text-slate-500">The final video animates the avatar's mouth to the voice.</p>
           </div>
         </aside>

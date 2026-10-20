@@ -11,12 +11,16 @@ SQLite (default) or PostgreSQL · FFmpeg · edge-tts / gTTS / espeak-ng · Pillo
 - **Auth:** email/password (bcrypt + JWT) and one-click **guest mode**.
 - **Dashboard:** list, create (blank or from template), rename, duplicate, delete, status
   (`draft → queued → rendering → done / failed`), preview player, MP4 download.
-- **Editor:** 6 bundled avatars + upload your own image · multi-scene script (per-scene text, background, image) ·
-  voice & language picker (24 voices), speed, voice preview · colour / gradient / image backgrounds ·
+- **Editor:** 6 bundled avatars + upload your own photo (face detection, optional background removal) · multi-scene
+  script (per-scene text, background, image) · 8 scenery backgrounds (office, beach, city, forest, ...) assignable per
+  scene · male/female voice filter, 24 voices, speed, voice preview that tells you which engine really played ·
+  colour / gradient / image backgrounds · intro title card ·
   auto-captions (3 styles, word highlight) · 16:9 / 9:16 / 1:1 · templates (explainer, social promo, product intro) ·
   background music (3 procedural royalty-free loops) · text / blog-URL → scenes.
-- **Render pipeline:** DB-backed job queue + background worker → per-scene TTS → amplitude-driven talking avatar →
-  captions → FFmpeg encode → concat (+ music) → MP4 + thumbnail. Progress via polling.
+- **Render pipeline:** DB-backed job queue + background worker → per-scene TTS → animated 2D "puppet" avatar (jaw/mouth
+  driven by the audio, plus breathing, body sway, head roll/nod/turn, eyebrows and blinks) → captions → slowly panning
+  scenery, intro title + avatar entrance, crossfades between scenes → FFmpeg encode → concat (+ music) → MP4 + thumbnail.
+  Progress via polling.
 - **Limits:** per-user and per-IP daily render caps, upload size/type validation (images are re-encoded), scene/length caps.
 
 ## Run locally (without Docker)
@@ -104,11 +108,16 @@ AVATAR_COMMAND=python /opt/sadtalker/inference.py --source_image {image} --drive
 
 ## Known limitations
 
-- **Lip-sync is amplitude-based**, not phoneme/viseme-accurate, unless you plug in a model provider. Bundled avatars are
-  flat-style illustrations. For uploaded photos the jaw is stretched and a dark mouth opening drawn at an assumed mouth
-  position (≈2/3 down the image) — results vary by photo.
-- **Voices need internet** for edge-tts (best quality) and gTTS; without it the offline `espeak-ng` voice (robotic) is used.
-  The job's detail page notes which engine was used. Non-English voices on the espeak fallback depend on installed espeak data.
+- **Animation is a 2D puppet, not a neural model.** The mouth opens with the audio loudness (not phoneme/viseme-accurate),
+  and head/body/eye motion is procedural. There are no arms or hand gestures. Photo animation uses OpenCV Haar face/eye
+  detection plus proportions for the mouth position, so it works best with a clear, front-facing, evenly lit photo; when no
+  face is found the editor warns you and the mouth position is a guess. Background removal uses GrabCut (good for plain
+  backdrops, rough on busy ones; untick "Remove photo background" to keep the original). Plug in SadTalker/Wav2Lip via
+  `AVATAR_PROVIDER=command` for true lip-sync.
+- **Voices need internet** for edge-tts (best quality, picks the exact voice). If it fails the app falls back to your
+  computer's own voices via pyttsx3 (Windows SAPI5 / macOS; picks a male or female voice), then Google TTS (a single
+  female voice, so male voices cannot be honoured), then espeak-ng. A warning is shown on the video page and in the voice
+  preview whenever a fallback was used. The pyttsx3 path was only exercised on Linux (espeak backend) while developing.
 - Caption word timing is estimated from word length across the speech span, not forced-aligned. Non-Latin scripts need a
   suitable system font (Noto fonts are installed in the Docker image); complex-script shaping (Indic, Arabic) is basic.
 - Progress is polling-only (no SSE). The in-process worker renders one video at a time.

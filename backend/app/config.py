@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     render_fps: int = 24
     render_scale: float = 1.0  # 1.0 => 1280x720 landscape; lower for faster renders
     ffmpeg_bin: str = "ffmpeg"
-    tts_providers: str = "edge,gtts,espeak"  # tried in order; "synthetic" is a test-only fallback
+    tts_providers: str = "edge,pyttsx3,gtts,espeak"  # tried in order; "synthetic" is a test-only fallback
     tts_timeout_seconds: int = 45
     avatar_provider: str = "amplitude"  # amplitude | command
     avatar_command: str = ""  # e.g. 'python sadtalker/inference.py --image {image} --audio {audio} --out {out}'

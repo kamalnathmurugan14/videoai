@@ -69,6 +69,12 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
         from ..services import music
         if body.music_id not in music.TRACKS:
             raise HTTPException(422, "Unknown music track")
+    bgs = [body.background] if body.background else []
+    if body.scenes is not None:
+        bgs += [sc.background for sc in body.scenes if sc.background]
+    for bg in bgs:
+        if bg.type == "scenery" and not catalog.get_scenery(bg.scenery_id or ""):
+            raise HTTPException(422, "Unknown scenery")
     if body.background and body.background.asset_id:
         asset_ids.add(body.background.asset_id)
     if body.scenes is not None:
@@ -94,6 +100,10 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
         p.music_id = body.music_id
     if body.background is not None:
         p.background = body.background.model_dump()
+    if body.intro_enabled is not None:
+        p.intro_enabled = body.intro_enabled
+    if body.intro_title is not None:
+        p.intro_title = body.intro_title.strip() or None
     if body.scenes is not None:
         p.scenes = [
             Scene(position=i, text=sc.text, media_asset_id=sc.media_asset_id,
@@ -124,6 +134,7 @@ def duplicate_project(project_id: int, db: Session = Depends(get_db), user: User
         owner_id=user.id, title=f"{src.title} (copy)"[:120], aspect_ratio=src.aspect_ratio, avatar_id=src.avatar_id,
         voice=src.voice, speed=src.speed, captions_enabled=src.captions_enabled, caption_style=src.caption_style,
         music_id=src.music_id, music_volume=src.music_volume, background=src.background,
+        intro_enabled=src.intro_enabled, intro_title=src.intro_title,
         scenes=[Scene(position=s.position, text=s.text, background=s.background, media_asset_id=s.media_asset_id) for s in src.scenes],
     )
     db.add(p)

@@ -53,3 +53,4 @@ def health():
 get_settings().storage_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=str(get_settings().storage_dir)), name="storage")
 app.mount("/avatar-art", StaticFiles(directory=str(ASSETS_DIR / "avatars")), name="avatar-art")
+app.mount("/scenery-art", StaticFiles(directory=str(ASSETS_DIR / "sceneries")), name="scenery-art")

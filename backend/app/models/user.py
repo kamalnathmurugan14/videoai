@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -27,4 +27,5 @@ class MediaAsset(Base):
     original_name: Mapped[str] = mapped_column(String(255), default="")
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # avatar landmarks / gender
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

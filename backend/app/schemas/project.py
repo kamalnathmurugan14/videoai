@@ -9,10 +9,11 @@ HexColor = str
 
 
 class Background(BaseModel):
-    type: Literal["color", "gradient", "image"] = "gradient"
+    type: Literal["color", "gradient", "image", "scenery"] = "gradient"
     color: str = Field(default="#4f46e5", pattern=r"^#[0-9a-fA-F]{6}$")
     color2: str = Field(default="#9333ea", pattern=r"^#[0-9a-fA-F]{6}$")
     asset_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    scenery_id: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
 
 
 class SceneIn(BaseModel):
@@ -45,6 +46,8 @@ class ProjectUpdate(BaseModel):
     clear_music: bool = False
     music_volume: float | None = Field(default=None, ge=0.0, le=1.0)
     background: Background | None = None
+    intro_enabled: bool | None = None
+    intro_title: str | None = Field(default=None, max_length=120)
     scenes: list[SceneIn] | None = None
 
     @field_validator("title")
@@ -92,6 +95,8 @@ class ProjectOut(ProjectSummary):
     music_id: str | None
     music_volume: float
     background: Background
+    intro_enabled: bool
+    intro_title: str | None
     error: str | None
     scenes: list[SceneOut]
     latest_job: JobOut | None

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "office",
+    "name": "Modern office",
+    "file": "office.jpg"
+  },
+  {
+    "id": "studio",
+    "name": "Studio lights",
+    "file": "studio.jpg"
+  },
+  {
+    "id": "city",
+    "name": "City at night",
+    "file": "city.jpg"
+  },
+  {
+    "id": "beach",
+    "name": "Beach sunset",
+    "file": "beach.jpg"
+  },
+  {
+    "id": "forest",
+    "name": "Forest",
+    "file": "forest.jpg"
+  },
+  {
+    "id": "mountains",
+    "name": "Mountains & lake",
+    "file": "mountains.jpg"
+  },
+  {
+    "id": "library",
+    "name": "Library",
+    "file": "library.jpg"
+  },
+  {
+    "id": "tech",
+    "name": "Tech network",
+    "file": "tech.jpg"
+  }
+]

@@ -8,6 +8,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
-    proxy: { '/api': api, '/storage': api, '/avatar-art': api },
+    proxy: { '/api': api, '/storage': api, '/avatar-art': api, '/scenery-art': api },
   },
 })

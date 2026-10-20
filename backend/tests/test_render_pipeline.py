@@ -24,7 +24,7 @@ def test_caption_timing_and_chunks():
 
 def test_tts_and_amplitude(tmp_path):
     wav = tmp_path / "a.wav"
-    assert tts.synthesize("Testing one two three", "en-US-AriaNeural", 1.0, wav) == "synthetic"
+    assert tts.synthesize("Testing one two three", "en-US-AriaNeural", 1.0, wav) == ("synthetic", [])
     env = avatar_mod.amplitude_envelope(wav, 12, 20)
     assert env.max() > 0.5 and env.min() >= 0
 
@@ -102,3 +102,52 @@ def test_command_avatar_provider(tmp_path, monkeypatch):
     assert p.name == "command"
     frames = list(p.frames(ASSETS_DIR / "avatars" / av["image"], av, wav, 128, 12, 6, tmp_path))
     assert len(frames) == 6 and frames[0].size == (128, 128)
+
+
+def test_photo_avatar_pipeline(tmp_path):
+    """Photo -> normalised avatar canvas with landmarks -> puppet frames (jaw/eyes/head motion) for a face-less image too."""
+    import numpy as np
+    from PIL import Image
+
+    from app.services import face
+
+    rng = np.random.default_rng(0)
+    photo = Image.fromarray((rng.random((300, 240, 3)) * 255).astype("uint8"))  # no detectable face -> heuristic landmarks
+    canvas, meta = face.build_avatar(photo, True, "male")
+    assert canvas.size == (face.CANVAS, face.CANVAS) and meta["found"] is False and meta["gender"] == "male"
+    assert 0 < meta["mouth"][1] < 1 and len(meta["eyes"]) == 2 and meta["has_mouth_art"] is False
+    path = tmp_path / "av.png"
+    canvas.save(path)
+    wav = tmp_path / "a.wav"
+    tts.synthesize("Moving head test sentence for the puppet", "en-US-GuyNeural", 1.0, wav)
+    frames = list(avatar_mod.PuppetAvatarProvider().frames(path, meta, wav, 160, 12, 24, tmp_path, seed=2))
+    assert len(frames) == 24 and frames[0].size == (160, 160)
+    import numpy as np
+    a, b = np.asarray(frames[0]).astype(int), np.asarray(frames[12]).astype(int)
+    assert np.abs(a - b).sum() > 0  # frames actually differ (motion)
+
+
+def test_scenery_intro_and_crossfade_render(tmp_path):
+    av = catalog.load_avatars()[3]
+    spec = renderer.RenderSpec(
+        scenes=[
+            renderer.SceneSpec("First scene on the office.", {"type": "scenery", "scenery_id": "office"}),
+            renderer.SceneSpec("Second scene by the beach.", {"type": "scenery", "scenery_id": "beach"}),
+        ],
+        aspect_ratio="16:9", avatar_path=ASSETS_DIR / "avatars" / av["image"], avatar_meta=av,
+        intro_enabled=True, intro_title="My Intro Title",
+    )
+    res = renderer.render_video(spec, tmp_path / "w", tmp_path / "o.mp4", tmp_path / "t.jpg", lambda p, s: None)
+    assert res.duration > 2.3 + 1.6  # intro (2.3 s) + two scenes
+    assert res.thumbnail.exists()
+
+
+def test_voice_gender_and_engine_notes(tmp_path, monkeypatch):
+    assert tts.voice_gender("en-US-GuyNeural") == "male" and tts.voice_gender("en-US-AriaNeural") == "female"
+    monkeypatch.setattr(get_settings(), "tts_providers", "gtts-missing,synthetic")
+    engine, errors = tts.synthesize("Fallback reporting", "en-US-GuyNeural", 1.0, tmp_path / "x.wav")
+    assert engine == "synthetic" and errors == []  # unknown engine names are skipped silently
+    monkeypatch.setattr(tts, "ENGINES", {**tts.ENGINES, "edge": lambda *a: (_ for _ in ()).throw(RuntimeError("no network"))})
+    monkeypatch.setattr(get_settings(), "tts_providers", "edge,synthetic")
+    engine, errors = tts.synthesize("Fallback reporting", "en-US-GuyNeural", 1.0, tmp_path / "y.wav")
+    assert engine == "synthetic" and "edge: no network" in errors[0]

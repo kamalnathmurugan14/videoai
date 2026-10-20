@@ -49,6 +49,7 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
     avatar_meta: dict = {}
     if project.avatar_id.startswith("asset:") and project.avatar_id[6:] in paths:
         avatar_path = paths[project.avatar_id[6:]]
+        avatar_meta = assets[project.avatar_id[6:]].meta or {}
     else:
         av = catalog.get_avatar(project.avatar_id) or catalog.load_avatars()[0]
         avatar_path, avatar_meta = ASSETS_DIR / "avatars" / av["image"], av
@@ -65,6 +66,7 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
         scenes=scenes, aspect_ratio=project.aspect_ratio, avatar_path=avatar_path, avatar_meta=avatar_meta,
         voice=project.voice, speed=project.speed, captions_enabled=project.captions_enabled,
         caption_style=project.caption_style, music_path=music_path, music_volume=project.music_volume,
+        intro_enabled=project.intro_enabled, intro_title=project.intro_title or project.title,
     )
     return spec, paths
 

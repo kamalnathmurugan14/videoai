@@ -4,12 +4,14 @@ import logging
 import math
 import shutil
 import subprocess
+import sys
 import wave
 from pathlib import Path
 
 import numpy as np
 
 from ..config import get_settings
+from .catalog import VOICES
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 24000
@@ -24,6 +26,13 @@ def _lang(voice: str) -> tuple[str, str]:
     parts = voice.split("-")
     full = "-".join(parts[:2]) if len(parts) >= 2 else parts[0]
     return parts[0].lower(), full
+
+
+_GENDER = {v[0]: v[3] for v in VOICES}
+
+
+def voice_gender(voice: str) -> str:
+    return _GENDER.get(voice, "female")
 
 
 def _ffmpeg(args: list[str]) -> None:
@@ -74,11 +83,44 @@ def _espeak(text: str, voice: str, speed: float, out: Path) -> None:
         raise TTSError("espeak-ng not installed")
     lang, full = _lang(voice)
     raw = out.with_suffix(".espeak.wav")
-    male = voice.lower().split("-")[-1].startswith(("guy", "ryan", "henri", "conrad", "jorge", "prabhat", "madhur", "valluvar"))
+    male = voice_gender(voice) == "male"
     v = f"{full.lower() if lang == 'en' else lang}{'+m3' if male else '+f3'}"
     r = subprocess.run([exe, "-v", v, "-s", str(int(165 * speed)), "-w", str(raw), text], capture_output=True, text=True, timeout=60)
     if r.returncode != 0 or not raw.exists():
         raise TTSError(f"espeak failed: {r.stderr[-200:]}")
+    _to_wav(raw, out)
+    raw.unlink(missing_ok=True)
+
+
+_PYTTSX3_SCRIPT = r"""
+import sys, pyttsx3
+text, out, gender, lang, rate = sys.argv[1:6]
+e = pyttsx3.init()
+voices = e.getProperty("voices")
+def score(v):
+    blob = (v.name + " " + str(getattr(v, "gender", "")) + " " + " ".join(str(l) for l in (v.languages or [])) + " " + v.id).lower()
+    s = 0
+    male = ("david", "mark", "george", "ravi", "male", "alex", "daniel", "fred")
+    female = ("zira", "hazel", "susan", "heera", "female", "samantha", "victoria", "karen")
+    if gender == "male" and any(k in blob for k in male) and "female" not in blob: s += 2
+    if gender == "female" and any(k in blob for k in female): s += 2
+    if lang in blob: s += 1
+    return s
+if voices:
+    e.setProperty("voice", max(voices, key=score).id)
+e.setProperty("rate", int(float(rate)))
+e.save_to_file(text, out)
+e.runAndWait()
+"""
+
+
+def _pyttsx3(text: str, voice: str, speed: float, out: Path) -> None:
+    lang, _ = _lang(voice)
+    raw = out.with_suffix(".sapi.wav")
+    r = subprocess.run([sys.executable, "-c", _PYTTSX3_SCRIPT, text, str(raw), voice_gender(voice), lang, str(175 * speed)],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 or not raw.exists() or raw.stat().st_size < 1000:
+        raise TTSError(f"pyttsx3 failed: {r.stderr[-200:]}")
     _to_wav(raw, out)
     raw.unlink(missing_ok=True)
 
@@ -100,11 +142,11 @@ def _synthetic(text: str, voice: str, speed: float, out: Path) -> None:
         w.writeframes(pcm.tobytes())
 
 
-ENGINES = {"edge": _edge, "gtts": _gtts, "espeak": _espeak, "synthetic": _synthetic}
+ENGINES = {"edge": _edge, "pyttsx3": _pyttsx3, "gtts": _gtts, "espeak": _espeak, "synthetic": _synthetic}
 
 
-def synthesize(text: str, voice: str, speed: float, out: Path) -> str:
-    """Write mono 24 kHz WAV to `out`; returns name of the engine that worked."""
+def synthesize(text: str, voice: str, speed: float, out: Path) -> tuple[str, list[str]]:
+    """Write mono 24 kHz WAV to `out`. Returns (engine that worked, errors from engines tried before it)."""
     errors = []
     for name in get_settings().tts_list:
         fn = ENGINES.get(name)
@@ -113,9 +155,9 @@ def synthesize(text: str, voice: str, speed: float, out: Path) -> str:
         try:
             fn(text, voice, speed, out)
             if out.exists() and out.stat().st_size > 1000:
-                return name
+                return name, errors
         except Exception as e:  # network down, missing engine, bad voice ...
-            errors.append(f"{name}: {str(e)[:120]}")
+            errors.append(f"{name}: {str(e)[:140]}")
             log.warning("TTS engine %s failed: %s", name, e)
     raise TTSError("No text-to-speech engine worked (" + "; ".join(errors) + ")")
 

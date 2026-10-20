@@ -19,20 +19,32 @@ class AssetOut(BaseModel):
     width: int
     height: int
     name: str
+    gender: str | None = None
+    face_found: bool | None = None  # avatars: was a face detected (animation quality depends on it)
+    background_removed: bool | None = None
 
 
 def _out(a: MediaAsset) -> AssetOut:
-    return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height, name=a.original_name)
+    m = a.meta or {}
+    return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height,
+                    name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"))
 
 
 @router.post("", response_model=AssetOut, status_code=201)
-async def upload(kind: str = Form("image"), file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def upload(kind: str = Form("image"), remove_bg: bool = Form(True), gender: str = Form("female"),
+                 file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if kind not in ("image", "avatar"):
         raise HTTPException(422, "kind must be 'image' or 'avatar'")
+    if gender not in ("female", "male"):
+        raise HTTPException(422, "gender must be 'female' or 'male'")
     data = await file.read(get_settings().max_upload_mb * 1024 * 1024 + 1)
-    filename, w, h = media_svc.save_image(data, kind)
+    meta = None
+    if kind == "avatar":
+        filename, w, h, meta = media_svc.save_avatar(data, remove_bg, gender)
+    else:
+        filename, w, h = media_svc.save_image(data)
     a = MediaAsset(id=filename.split(".")[0], owner_id=user.id, kind=kind, filename=filename,
-                   original_name=(file.filename or "")[:255], width=w, height=h)
+                   original_name=(file.filename or "")[:255], width=w, height=h, meta=meta)
     db.add(a)
     db.commit()
     return _out(a)

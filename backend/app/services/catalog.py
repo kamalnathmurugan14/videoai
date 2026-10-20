@@ -97,3 +97,12 @@ def load_avatars() -> list[dict]:
 
 def get_avatar(avatar_id: str) -> dict | None:
     return next((a for a in load_avatars() if a["id"] == avatar_id), None)
+
+
+def load_sceneries() -> list[dict]:
+    path = ASSETS_DIR / "sceneries" / "sceneries.json"
+    return json.loads(path.read_text()) if path.exists() else []
+
+
+def get_scenery(scenery_id: str) -> dict | None:
+    return next((s for s in load_sceneries() if s["id"] == scenery_id), None)

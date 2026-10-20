@@ -54,6 +54,7 @@ export const api = {
   usage: () => request('/usage'),
   config: () => request('/config'),
   avatars: () => request('/avatars'),
+  sceneries: () => request('/sceneries'),
   voices: () => request('/voices'),
   templates: () => request('/templates'),
   music: () => request('/music'),
@@ -68,9 +69,10 @@ export const api = {
   duplicateProject: (id) => request(`/projects/${id}/duplicate`, { method: 'POST' }),
   render: (id) => request(`/projects/${id}/render`, { method: 'POST' }),
   listAssets: () => request('/media'),
-  uploadAsset: (file, kind = 'image') => {
+  uploadAsset: (file, kind = 'image', extra = {}) => {
     const form = new FormData()
     form.append('kind', kind)
+    Object.entries(extra).forEach(([k, v]) => form.append(k, String(v)))
     form.append('file', file)
     return request('/media', { method: 'POST', form })
   },

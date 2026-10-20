@@ -21,6 +21,9 @@
       ]
     ],
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "female",
     "image": "aria.png",
     "preview": "aria_preview.png"
   },
@@ -46,6 +49,9 @@
       ]
     ],
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "male",
     "image": "leo.png",
     "preview": "leo_preview.png"
   },
@@ -71,6 +77,9 @@
       ]
     ],
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "female",
     "image": "maya.png",
     "preview": "maya_preview.png"
   },
@@ -96,6 +105,9 @@
       ]
     ],
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "male",
     "image": "sam.png",
     "preview": "sam_preview.png"
   },
@@ -121,6 +133,9 @@
       ]
     ],
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "female",
     "image": "noor.png",
     "preview": "noor_preview.png"
   },
@@ -135,6 +150,9 @@
     "skin": "#cbd5e1",
     "eyes": null,
     "has_mouth_art": true,
+    "chin": 0.703125,
+    "face_w": 0.46875,
+    "gender": "male",
     "image": "robo.png",
     "preview": "robo_preview.png"
   }

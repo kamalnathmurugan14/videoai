@@ -1,4 +1,5 @@
 import hashlib
+import json
 import time
 from collections import defaultdict, deque
 
@@ -36,7 +37,13 @@ def config():
 
 @router.get("/avatars")
 def avatars():
-    return [{"id": a["id"], "name": a["name"], "url": f"/avatar-art/{a['preview']}"} for a in catalog.load_avatars()]
+    return [{"id": a["id"], "name": a["name"], "gender": a.get("gender"), "url": f"/avatar-art/{a['preview']}"}
+            for a in catalog.load_avatars()]
+
+
+@router.get("/sceneries")
+def sceneries():
+    return [{"id": s["id"], "name": s["name"], "url": f"/scenery-art/{s['file']}"} for s in catalog.load_sceneries()]
 
 
 @router.get("/voices")
@@ -59,18 +66,26 @@ def voice_preview(body: VoicePreview, request: Request, user: User = Depends(get
     if body.voice not in catalog.VOICE_IDS:
         raise HTTPException(422, "Unknown voice")
     _rate_limit(f"preview:{user.id}", 15)
-    key = hashlib.sha1(f"{body.voice}|{body.speed}|{body.text}".encode()).hexdigest()[:20]
+    key = hashlib.sha1(f"{get_settings().tts_providers}|{body.voice}|{body.speed}|{body.text}".encode()).hexdigest()[:20]
     out = storage.subdir("previews") / f"{key}.mp3"
+    info = out.with_suffix(".txt")
     if not out.exists():
         wav = out.with_suffix(".wav")
         try:
-            engine = tts.synthesize(body.text, body.voice, body.speed, wav)
+            engine, errors = tts.synthesize(body.text, body.voice, body.speed, wav)
             tts._ffmpeg(["-i", str(wav), "-b:a", "64k", str(out)])
+            warning = None
+            if errors:
+                warning = f"The preferred voice engine failed ({errors[0]}). Using '{engine}', so the voice may differ from the one you picked."
+            elif engine == "gtts" and tts.voice_gender(body.voice) == "male":
+                warning = "Google TTS only has a female voice, so this male voice cannot be played."
+            info.write_text(json.dumps({"engine": engine, "warning": warning}))
         except tts.TTSError as e:
             raise HTTPException(503, str(e))
         finally:
             wav.unlink(missing_ok=True)
-    return {"url": f"/storage/previews/{key}.mp3"}
+    meta = json.loads(info.read_text()) if info.exists() else {}
+    return {"url": f"/storage/previews/{key}.mp3", **meta}
 
 
 @router.post("/import/text")

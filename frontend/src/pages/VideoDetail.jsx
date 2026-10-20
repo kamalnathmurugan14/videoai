@@ -86,7 +86,16 @@ export default function VideoDetail() {
             )}
           </div>
           {p.status === 'failed' && <div className="mt-4"><ErrorBox>{p.error || 'Rendering failed.'}</ErrorBox></div>}
-          {job?.info && p.status === 'done' && <p className="mt-3 whitespace-pre-line text-xs text-slate-400">{job.info}</p>}
+          {job?.info && (
+            <div className="mt-3 space-y-2">
+              {job.info.split('\n').filter((l) => l.startsWith('⚠')).slice(0, 1).map((l) => (
+                <p key={l} role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {l}<br /><span className="text-xs">The voice may differ from the one you chose. Check your internet connection (the best voices need it), or pick another voice and render again.</span>
+                </p>
+              ))}
+              <p className="whitespace-pre-line text-xs text-slate-400">{job.info}</p>
+            </div>
+          )}
         </div>
 
         <aside className="space-y-3">

@@ -106,3 +106,32 @@ def test_import_text(client, auth):
     r = client.post("/api/import/text", json={"text": text, "max_scenes": 3}, headers=auth)
     assert r.status_code == 200 and 1 <= len(r.json()["scenes"]) <= 3
     assert client.post("/api/import/url", json={"url": "http://127.0.0.1:8000/"}, headers=auth).status_code == 400
+
+
+def test_sceneries_and_intro_settings(client, auth):
+    sc = client.get("/api/sceneries").json()
+    assert len(sc) >= 6 and client.get(sc[0]["url"]).status_code == 200
+    pid = client.post("/api/projects", json={}, headers=auth).json()["id"]
+    url = f"/api/projects/{pid}"
+    r = client.put(url, headers=auth, json={
+        "intro_enabled": False, "intro_title": "Hello",
+        "background": {"type": "scenery", "scenery_id": sc[0]["id"]},
+        "scenes": [{"text": "a", "background": {"type": "scenery", "scenery_id": sc[1]["id"]}}],
+    })
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["intro_enabled"] is False and out["intro_title"] == "Hello"
+    assert out["scenes"][0]["background"]["scenery_id"] == sc[1]["id"]
+    assert client.put(url, headers=auth, json={"background": {"type": "scenery", "scenery_id": "nope"}}).status_code == 422
+
+
+def test_avatar_upload_reports_meta(client, auth):
+    import numpy as np
+
+    buf = io.BytesIO()
+    Image.fromarray((np.random.default_rng(1).random((240, 200, 3)) * 255).astype("uint8")).save(buf, "PNG")
+    r = client.post("/api/media", headers=auth, data={"kind": "avatar", "gender": "male", "remove_bg": "true"}, files={"file": ("p.png", buf.getvalue(), "image/png")})
+    assert r.status_code == 201, r.text
+    a = r.json()
+    assert a["gender"] == "male" and a["face_found"] is False and (a["width"], a["height"]) == (768, 768)
+    assert client.post("/api/media", headers=auth, data={"kind": "avatar", "gender": "robot"}, files={"file": ("p.png", buf.getvalue(), "image/png")}).status_code == 422

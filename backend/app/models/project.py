@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +24,8 @@ class Project(Base):
     music_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     music_volume: Mapped[float] = mapped_column(Float, default=0.15)
     background: Mapped[dict] = mapped_column(JSON, default=dict)
+    intro_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
+    intro_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
     video_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
