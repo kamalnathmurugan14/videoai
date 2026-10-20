@@ -41,8 +41,10 @@ def save_image(data: bytes) -> tuple[str, int, int]:
 def save_avatar(data: bytes, remove_bg: bool, gender: str) -> tuple[str, int, int, dict]:
     """Photo -> normalised avatar canvas with detected landmarks. Returns (filename, w, h, meta)."""
     img = _open(data)
-    canvas, meta = face.build_avatar(img, remove_bg, gender)
+    canvas, meta, full = face.build_avatar_full(img, remove_bg, gender)
     name = storage.new_id()
     filename = f"{name}.png"
     canvas.save(storage.subdir("uploads") / filename, "PNG", optimize=True)
+    full.save(storage.subdir("uploads") / f"{name}_full.jpg", "JPEG", quality=92)  # original-photo framing
+    meta["full"]["file"] = f"{name}_full.jpg"
     return filename, canvas.width, canvas.height, meta

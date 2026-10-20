@@ -113,7 +113,33 @@ frontend/src/      pages (Landing, Auth, Dashboard, Editor, VideoDetail), api cl
 queued job (`UPDATE … WHERE status='queued'`), writes progress/stage rows as it goes, and on restart re-queues jobs
 left `running`. The frontend polls `GET /api/projects/{id}` / `GET /api/jobs/{id}`.
 
-### Realistic lip-sync with SadTalker (optional)
+### HeyGen-like videos on a free Google Colab GPU (recommended without an NVIDIA GPU)
+
+HeyGen-style output (real mouth and teeth, head motion, **hand gestures**) needs a neural video model on a GPU. The
+notebook [`colab/VideoAI_GPU_worker.ipynb`](colab/VideoAI_GPU_worker.ipynb) runs one on Google's free T4 GPU:
+
+* **EchoMimicV2** (Apache-2.0): half-body animation with hand gestures from one photo + voice.
+* **SadTalker** (Apache-2.0): face / lip-sync; used automatically when EchoMimicV2 fails (e.g. out of GPU memory).
+
+1. Open it in Colab: <https://colab.research.google.com/github/kamalnathmurugan14/videoai/blob/main/colab/VideoAI_GPU_worker.ipynb>
+2. *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all* (first run downloads ~15 GB, ~20–30 min).
+3. Paste the printed **URL** and **TOKEN** into VideoAI → **System check → GPU worker** → *Connect*.
+4. Editor → *Look & feel* → *Animation engine* → **HeyGen-like (EchoMimicV2, Colab GPU)** → Render. Keep the Colab tab open.
+
+The notebook embeds `colab/gpu_worker.py` (regenerate with `python colab/build_notebook.py` after editing it). It is a
+small FastAPI server behind a free Cloudflare quick tunnel; every request needs the token. Speed on the free T4 is slow
+(EchoMimicV2 roughly 10–30 min per 10 s of video, SadTalker ~1 min); free Colab sessions also time out, after which you
+run the notebook again and paste the new URL. If the worker is unreachable or fails, that scene falls back to the
+built-in engine and the video page says so. EchoMimicV2 drives the hands from its bundled demo pose sequences, so a scene
+can be at most as long as the pose sequence (~10+ s); longer scenes use SadTalker.
+
+### Original-photo framing (HeyGen style)
+
+Uploading a photo now defaults to HeyGen's look: your original photo with its own background fills a 9:16 frame and is
+animated in place; captions, intro and drawn hands are off (turn them on in *Look & feel*). Switch *Framing* to
+*Cut-out on a background* for the scenery look. Landscape frames fit the photo to the height with a blurred fill.
+
+### Realistic lip-sync with SadTalker on this PC (optional)
 
 The built-in engine animates the photo in 2D (fast, any computer). For neural, audio-driven lip-sync, expressions and head
 motion, install [SadTalker](https://github.com/OpenTalker/SadTalker) (Apache-2.0):

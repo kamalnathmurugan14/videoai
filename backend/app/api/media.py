@@ -31,13 +31,14 @@ class AssetOut(BaseModel):
     detection: str | None = None  # landmarks | haar | guess
     warning: str | None = None
     mouth: list[float] | None = None  # [x, y, width] as fractions of the (square) avatar image
+    full_url: str | None = None  # the original photo (for "original photo" framing)
 
 
 def _out(a: MediaAsset) -> AssetOut:
     m = a.meta or {}
     return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height,
                     name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"), detection=m.get("source"), warning=m.get("warning"),
-                    mouth=m.get("mouth"))
+                    mouth=m.get("mouth"), full_url=f"/storage/uploads/{m['full']['file']}" if m.get("full", {}).get("file") else None)
 
 
 @router.post("", response_model=AssetOut, status_code=201)
@@ -90,5 +91,7 @@ def delete_asset(asset_id: str, db: Session = Depends(get_db), user: User = Depe
         if p.avatar_id == f"asset:{asset_id}":
             p.avatar_id = "aria"
     storage.remove_rel(f"uploads/{a.filename}")
+    if (a.meta or {}).get("full", {}).get("file"):
+        storage.remove_rel(f"uploads/{a.meta['full']['file']}")
     db.delete(a)
     db.commit()

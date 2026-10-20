@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from ..config import ASSETS_DIR, get_settings
 from . import avatar as avatar_mod
+from . import face as face_mod
 from . import captions as cap
 from . import tts
 
@@ -42,7 +43,9 @@ class RenderSpec:
     intro_enabled: bool = True
     intro_title: str = ""
     gestures_enabled: bool = True
-    animation_engine: str = "builtin"  # builtin | sadtalker
+    animation_engine: str = "builtin"  # builtin | sadtalker | gpu_echomimic | gpu_sadtalker
+    framing: str = "scene"  # scene: cut-out on a background | photo: original photo fills the frame (HeyGen style)
+    photo_full_path: Path | None = None
 
 
 @dataclass
@@ -214,6 +217,16 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
     cap_r = cap.CaptionRenderer(W, H, spec.caption_style, all_text)
     title = (spec.intro_title or "").strip()
     PAN = 1.12  # background is rendered 12% larger and drifts slowly for a sense of camera movement
+    photo_mode = bool(spec.framing == "photo" and spec.photo_full_path and spec.photo_full_path.exists()
+                      and (spec.avatar_meta or {}).get("full"))
+    avatar_path, avatar_meta = spec.avatar_path, spec.avatar_meta
+    if spec.framing == "photo" and not photo_mode:
+        notes.append("⚠ Original-photo framing needs an uploaded photo (re-upload older ones); used the cut-out instead")
+    if photo_mode:  # HeyGen style: the original photo is the whole frame and is animated in place
+        pc, avatar_meta = face_mod.photo_canvas(Image.open(spec.photo_full_path), spec.avatar_meta, W, H)
+        avatar_path = workdir / "photo_canvas.png"
+        pc.save(avatar_path)
+        PF = avatar_meta["photo_frame"]
     XFADE = max(2, fps // 3)
 
     for si, sc in enumerate(scenes):
@@ -236,8 +249,10 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
         total = lead + max(speech, 0.8) + 0.45
         n_frames = math.ceil(total * fps)
 
-        has_media = bool(sc.media_path and sc.media_path.exists())
+        has_media = bool(sc.media_path and sc.media_path.exists()) and not photo_mode
         size, cx, bottom, media_box, cap_y = layout(spec.aspect_ratio, W, H, has_media)
+        if photo_mode:
+            size = max(W, H)
         bgW, bgH = int(W * PAN), int(H * PAN)
         bg_big = make_background(sc.background, bgW, bgH, (bg_paths or {}).get(sc.background.get("asset_id") or ""))
         pan_from, pan_to = ((0, 0), (bgW - W, bgH - H)) if si % 2 == 0 else ((bgW - W, 0), (0, bgH - H))
@@ -271,20 +286,25 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
                     return cap_cache[key]
             return None
 
-        progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: " + ("realistic lip-sync with SadTalker (can take minutes)"
-                                                                if provider.name == "sadtalker" else "animating avatar"))
-        if spec.avatar_path is None:
+        stage = {"sadtalker": "realistic lip-sync with SadTalker (can take minutes)",
+                 "gpu_echomimic": "generating on the Colab GPU with EchoMimicV2 (can take a long time)",
+                 "gpu_sadtalker": "generating on the Colab GPU with SadTalker"}.get(provider.name, "animating avatar")
+        progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: {stage}")
+        if avatar_path is None:
             raise RenderError("No avatar selected")
-        frames_iter = provider.frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames, workdir, seed=si,
-                                      gestures=spec.gestures_enabled)
+        gestures_on = spec.gestures_enabled and not photo_mode  # no drawn hands on a real photo
+        frames_iter = provider.frames(avatar_path, avatar_meta, wav, size, fps, n_frames, workdir, seed=si,
+                                      gestures=gestures_on)
         if provider.name != avatar_mod.PuppetAvatarProvider.name:
             try:  # external engines do their heavy work on the first frame: fail over to the built-in animation
                 first = next(frames_iter)
                 frames_iter = itertools.chain([first], frames_iter)
+                if getattr(provider, "last_message", ""):
+                    notes.append(f"Scene {si + 1}: {provider.last_message}")
             except Exception as e:
                 notes.append(f"⚠ Scene {si + 1}: {provider.name} failed ({str(e)[:300]}); used the built-in animation instead")
-                frames_iter = avatar_mod.PuppetAvatarProvider().frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames,
-                                                                        workdir, seed=si, gestures=spec.gestures_enabled)
+                frames_iter = avatar_mod.PuppetAvatarProvider().frames(avatar_path, avatar_meta, wav, size, fps, n_frames,
+                                                                        workdir, seed=si, gestures=gestures_on)
         thumb_at = min(n_frames - 1, int((lead + 0.7) * fps)) if si == 0 else None
 
         def raw_frames():
@@ -292,21 +312,26 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
             frame = None
             for i, av in enumerate(frames_iter):
                 t = i / fps
-                k = i / max(1, n_frames - 1)
-                ox = round(pan_from[0] + (pan_to[0] - pan_from[0]) * k)
-                oy = round(pan_from[1] + (pan_to[1] - pan_from[1]) * k)
-                frame = bg_big.crop((ox, oy, ox + W, oy + H))
+                if photo_mode:  # the animated photo is the whole frame
+                    frame = av.crop((PF["x"], PF["y"], PF["x"] + W, PF["y"] + H)).convert("RGB")
+                    av = None
+                else:
+                    k = i / max(1, n_frames - 1)
+                    ox = round(pan_from[0] + (pan_to[0] - pan_from[0]) * k)
+                    oy = round(pan_from[1] + (pan_to[1] - pan_from[1]) * k)
+                    frame = bg_big.crop((ox, oy, ox + W, oy + H))
                 if media_layer is not None:
                     frame.paste(media_layer, media_pos, media_layer)
-                # avatar entrance during the intro: rise + fade in
-                dy = 0
-                if si == 0 and lead:
-                    e = _ease_out(t / 0.9)
-                    dy = int((1 - e) * 0.12 * size)
-                    if e < 1:
-                        av = av.copy()
-                        av.putalpha(av.getchannel("A").point(lambda v, e=e: int(v * e)))
-                frame.paste(av, (ax, ay + dy), av)
+                if av is not None:
+                    # avatar entrance during the intro: rise + fade in
+                    dy = 0
+                    if si == 0 and lead:
+                        e = _ease_out(t / 0.9)
+                        dy = int((1 - e) * 0.12 * size)
+                        if e < 1:
+                            av = av.copy()
+                            av.putalpha(av.getchannel("A").point(lambda v, e=e: int(v * e)))
+                    frame.paste(av, (ax, ay + dy), av)
                 if title_layer is not None and t < lead:
                     ta = min(1.0, max(0.0, (t - 0.15) / 0.6)) * min(1.0, max(0.0, (lead - 0.1 - t) / 0.4))
                     if ta > 0:

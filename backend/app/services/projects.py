@@ -30,7 +30,7 @@ def to_out(p: Project) -> ProjectOut:
         **summary_fields(p),
         avatar_id=p.avatar_id, voice=p.voice, speed=p.speed, captions_enabled=p.captions_enabled,
         caption_style=p.caption_style, music_id=p.music_id, music_volume=p.music_volume,
-        background=Background(**(p.background or DEFAULT_BG)), intro_enabled=p.intro_enabled, intro_title=p.intro_title, gestures_enabled=p.gestures_enabled, animation_engine=p.animation_engine,
+        background=Background(**(p.background or DEFAULT_BG)), intro_enabled=p.intro_enabled, intro_title=p.intro_title, gestures_enabled=p.gestures_enabled, animation_engine=p.animation_engine, framing=p.framing,
         error=p.error,
         scenes=[SceneOut.model_validate(s) for s in p.scenes],
         latest_job=JobOut.model_validate(job) if job else None,

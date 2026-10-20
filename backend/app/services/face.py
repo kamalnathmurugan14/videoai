@@ -3,7 +3,7 @@ import math
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter, ImageOps
 
 from . import landmarks, segment
 
@@ -279,6 +279,13 @@ def _shift_info(info: dict, dx: float, dy: float) -> dict:
 
 def build_avatar(img: Image.Image, remove_bg: bool, gender: str) -> tuple[Image.Image, dict]:
     """Photo -> square RGBA avatar canvas (face normalised to the same layout as the bundled avatars) + landmark metadata."""
+    canvas, meta, _ = build_avatar_full(img, remove_bg, gender)
+    return canvas, meta
+
+
+def build_avatar_full(img: Image.Image, remove_bg: bool, gender: str) -> tuple[Image.Image, dict, Image.Image]:
+    """Like build_avatar, plus the full processed photo (straightened, smile closed, original background) whose pixel
+    landmarks are stored in meta["full"] for the HeyGen-style "original photo" framing."""
     img = img.convert("RGB")
     img.thumbnail((1024, 1024))
     rgb = np.asarray(img)
@@ -294,6 +301,7 @@ def build_avatar(img: Image.Image, remove_bg: bool, gender: str) -> tuple[Image.
         info["already_open"] = False
         info["mouth_closed_by_warp"] = True
     h, w = rgb.shape[:2]
+    full_img = Image.fromarray(rgb.copy())
     alpha = cutout_alpha(rgb, info) if (remove_bg and info["found"]) else None
     cut = alpha is not None
     a = alpha.astype(np.float32) / 255 if cut else np.ones((h, w), np.float32)
@@ -339,4 +347,61 @@ def build_avatar(img: Image.Image, remove_bg: bool, gender: str) -> tuple[Image.
         warn.append("The head is strongly tilted or turned. The animation works best with a front-facing photo.")
     if warn:
         meta["warning"] = " ".join(warn)
-    return canvas, meta
+    # pixel-space landmarks of the full photo (inverse of the canvas transform, so both stay consistent)
+    fx_ = lambda v: float(v * CANVAS - ox) / scale
+    fy_ = lambda v: float(v * CANVAS - oy) / scale
+    meta["full"] = {
+        "w": w, "h": h, "mouth": [fx_(meta["mouth"][0]), fy_(meta["mouth"][1]), meta["mouth"][2] * CANVAS / scale],
+        "eyes": [[fx_(x), fy_(y), r * CANVAS / scale] for x, y, r in meta["eyes"]], "chin": fy_(meta["chin"]),
+        "face_w": float(info["face_w"]), "seam": [[fx_(x), fy_(y)] for x, y in meta.get("seam", [])],
+    }
+    return canvas, meta, full_img
+
+
+def photo_canvas(full: Image.Image, meta: dict, W: int, H: int) -> tuple[Image.Image, dict]:
+    """HeyGen-style framing: the original photo (with its own background) cover-fills a W x H frame, face in the upper
+    third. Returned as an opaque S x S canvas (S = max(W, H), frame centred, borders edge-extended so the animation warp
+    never pulls in empty pixels) plus animation metadata in canvas-normalised units."""
+    fm = meta["full"]
+    w, h = full.size
+    src = full.convert("RGB")
+    if (W / H) / (w / h) > 1.3:
+        # frame much wider than the photo (e.g. portrait photo in 16:9): fit the photo to the height and fill the sides
+        # with a blurred, darkened copy of itself instead of zooming into the face
+        s = H / h
+        nw = round(w * s)
+        back = ImageOps.fit(src, (W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(max(8, W // 60)))
+        back = Image.eval(back, lambda v: int(v * 0.8))
+        fg = src.resize((nw, H), Image.LANCZOS)
+        ox = -(W - nw) // 2  # negative offset: the photo sits centred inside the frame
+        oy = 0
+        ramp = np.clip(np.minimum(np.arange(nw), nw - 1 - np.arange(nw)) / max(1, nw * 0.12), 0, 1) ** 1.5
+        mask = Image.fromarray((np.tile(ramp, (H, 1)) * 255).astype(np.uint8))  # feather the photo's side edges
+        back.paste(fg, (-ox, 0), mask)
+        frame = np.asarray(back)
+    else:
+        s = max(W / w, H / h)
+        nw, nh = max(W, round(w * s)), max(H, round(h * s))
+        img = src.resize((nw, nh), Image.LANCZOS)
+        ex = (fm["eyes"][0][0] + fm["eyes"][1][0]) / 2 * s
+        ey = (fm["eyes"][0][1] + fm["eyes"][1][1]) / 2 * s
+        ox = int(np.clip(ex - W / 2, 0, nw - W))
+        oy = int(np.clip(ey - 0.36 * H, 0, nh - H))
+        frame = np.asarray(img.crop((ox, oy, ox + W, oy + H)))
+    S = max(W, H)
+    px, py = (S - W) // 2, (S - H) // 2
+    sq = cv2.copyMakeBorder(frame, py, S - H - py, px, S - W - px, cv2.BORDER_REPLICATE)
+    canvas = Image.fromarray(sq).convert("RGBA")
+    tx = lambda x: (x * s - ox + px) / S
+    ty = lambda y: (y * s - oy + py) / S
+    face_w = fm["face_w"] * s / S * (0.46 / 0.39)  # same convention as the normalised canvas (0.46 <-> mesh width 0.39)
+    out = {k: v for k, v in meta.items() if k not in ("full",)}
+    out.update({
+        "mouth": [tx(fm["mouth"][0]), ty(fm["mouth"][1]), fm["mouth"][2] * s / S],
+        "eyes": [[tx(x), ty(y), r * s / S] for x, y, r in fm["eyes"]], "chin": ty(fm["chin"]),
+        "face_w": face_w, "motion_scale": face_w / 0.46, "seam": [[tx(x), ty(y)] for x, y in fm["seam"]] or None,
+        "photo_frame": {"W": W, "H": H, "x": px, "y": py},
+    })
+    if not out["seam"]:
+        out.pop("seam")
+    return canvas, out

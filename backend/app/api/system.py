@@ -5,11 +5,12 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from ..config import APP_VERSION, get_settings
 from ..deps import get_current_user
 from ..models import User
-from ..services import catalog, landmarks, sadtalker, segment, storage, tts
+from ..services import catalog, landmarks, remote_gpu, sadtalker, segment, storage, tts
 from .catalog import _rate_limit
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -45,6 +46,7 @@ def system_info():
         "tts_order": s.tts_list,
         "espeak": bool(shutil.which("espeak-ng") or shutil.which("espeak")),
         "sadtalker": sadtalker.status(),
+        "remote_gpu": {"configured": remote_gpu.configured(), "url": remote_gpu.get().get("url")},
     }
 
 
@@ -94,3 +96,32 @@ def sadtalker_check(user: User = Depends(get_current_user)):
         return {"ok": True, "seconds": secs, "device": dev, "video_url": storage.url_for(rel)}
     except Exception as e:
         return {"ok": False, "error": str(e)[:800], "device": dev}
+
+
+class RemoteGPUIn(BaseModel):
+    url: str = Field(min_length=8, max_length=300, pattern=r"^https?://")
+    token: str = Field(default="", max_length=200)
+
+
+@router.put("/remote-gpu")
+def set_remote_gpu(body: RemoteGPUIn, user: User = Depends(get_current_user)):
+    """Connect the Colab GPU worker (its public URL + token change every time the notebook starts)."""
+    remote_gpu.save(body.url, body.token)
+    try:
+        return {"ok": True, "health": remote_gpu.health()}
+    except Exception as e:  # saved anyway, so the user can fix the notebook and re-test
+        return {"ok": False, "error": str(e)[:400]}
+
+
+@router.delete("/remote-gpu", status_code=204)
+def clear_remote_gpu(user: User = Depends(get_current_user)):
+    remote_gpu.clear()
+
+
+@router.post("/remote-gpu/check")
+def check_remote_gpu(user: User = Depends(get_current_user)):
+    _rate_limit(f"gpucheck:{user.id}", 10)
+    try:
+        return {"ok": True, "health": remote_gpu.health()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:400]}

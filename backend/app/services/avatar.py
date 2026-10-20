@@ -203,27 +203,29 @@ class PuppetAvatarProvider(AvatarProvider):
     G = 96  # resolution of the coarse displacement grid
 
     def _field(self, x, y, m, p):
-        """Displacement (normalised units) at normalised points (x, y); `p` holds this frame's motion parameters."""
+        """Displacement (normalised units) at normalised points (x, y); `p` holds this frame's motion parameters.
+        Distances are tuned for a face 0.46 wide; `motion_scale` rescales them for smaller faces (full-frame photos)."""
         mx, my, mw = m["mouth"]
         chin, fw = m["chin"], m["face_w"]
+        k = m.get("motion_scale", 1.0)
         # body: breathing + sway that grows toward the head, bottom edge stays put
         lift = np.clip((1.0 - y) / 0.7, 0, 1)
-        dx = p["sway"] * lift ** 1.4
-        dy = -p["breath"] * (1.0 - y)
+        dx = p["sway"] * k * lift ** 1.4
+        dy = -p["breath"] * k * (1.0 - y)
         # head: rotation about the neck + translation, fading out over the shoulders
-        pvx, pvy = mx, chin + 0.04
-        wh = 1.0 - _sstep(pvy - 0.02, pvy + 0.13, y)
+        pvx, pvy = mx, chin + 0.04 * k
+        wh = 1.0 - _sstep(pvy - 0.02 * k, pvy + 0.13 * k, y)
         th = math.radians(p["roll"])
         rx, ry = x - pvx, y - pvy
-        dx = dx + wh * ((math.cos(th) - 1) * rx - math.sin(th) * ry + p["yaw"])
-        dy = dy + wh * (math.sin(th) * rx + (math.cos(th) - 1) * ry + p["nod"])
+        dx = dx + wh * ((math.cos(th) - 1) * rx - math.sin(th) * ry + p["yaw"] * k)
+        dy = dy + wh * (math.sin(th) * rx + (math.cos(th) - 1) * ry + p["nod"] * k)
         # shoulders: shrug on emphasis; upper body leans in toward the camera
-        sh = _sstep(chin + 0.02, chin + 0.10, y) * (1 - _sstep(0.88, 1.0, y)) * _sstep(0.10, 0.20, np.abs(x - mx))
-        dy = dy - p["shrug"] * 0.016 * sh - p["lean"] * 0.020 * np.clip((1.0 - y) / 0.6, 0, 1)
+        sh = _sstep(chin + 0.02 * k, chin + 0.10 * k, y) * (1 - _sstep(0.88, 1.0, y)) * _sstep(0.10 * k, 0.20 * k, np.abs(x - mx))
+        dy = dy - p["shrug"] * 0.016 * k * sh - p["lean"] * 0.020 * k * np.clip((1.0 - y) / 0.6, 0, 1)
         # eyebrows lift
         ex = (m["eyes"][0][0] + m["eyes"][1][0]) / 2
         ey = (m["eyes"][0][1] + m["eyes"][1][1]) / 2
-        dy = dy - p["brow"] * 0.012 * np.exp(-0.5 * (((x - ex) / (fw * 0.5)) ** 2 + ((y - (ey - 0.055)) / 0.025) ** 2))
+        dy = dy - p["brow"] * 0.012 * k * np.exp(-0.5 * (((x - ex) / (fw * 0.5)) ** 2 + ((y - (ey - 0.055 * k)) / (0.025 * k)) ** 2))
         # blink (photos): pull the skin above each eye down over it, which keeps the real texture and lighting
         if p["blink"] > 0 and not m["has_mouth_art"]:
             for bx, by, br in m["eyes"]:
@@ -237,8 +239,8 @@ class PuppetAvatarProvider(AvatarProvider):
                 sx, sy = zip(*m["seam"])
                 seam_y = np.interp(x, sx, sy)
                 outside = (x < min(sx)) | (x > max(sx))  # beyond the lip corners never start above the lip centre
-                seam_y = np.where(outside, np.maximum(seam_y, my + 0.004), seam_y)
-            below = _sstep(seam_y, seam_y + 0.004, y) * (1.0 - _sstep(chin - 0.01, chin + 0.07, y))
+                seam_y = np.where(outside, np.maximum(seam_y, my + 0.004 * k), seam_y)
+            below = _sstep(seam_y, seam_y + 0.004 * k, y) * (1.0 - _sstep(chin - 0.01 * k, chin + 0.07 * k, y))
             narrow = np.exp(-0.5 * ((x - mx) / (fw * 0.20)) ** 2)
             wide = np.exp(-0.5 * ((x - mx) / (fw * 0.45)) ** 2)
             dy = dy + below * p["jaw"] * (0.75 * narrow + 0.25 * wide)
@@ -295,7 +297,8 @@ class PuppetAvatarProvider(AvatarProvider):
             D = cv2.resize(D, (size, size), interpolation=cv2.INTER_LINEAR)
             map_x = X - D[..., 0] * gain
             map_y = Y - D[..., 1] * gain
-            out = cv2.remap(src, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+            border = cv2.BORDER_REPLICATE if m.get("photo_frame") else cv2.BORDER_CONSTANT  # opaque photo: extend the edges
+            out = cv2.remap(src, map_x, map_y, cv2.INTER_LINEAR, borderMode=border, borderValue=(0, 0, 0, 0))
             alpha = out[..., 3:4].astype(np.float32)
             rgb = np.where(alpha > 0, out[..., :3].astype(np.float32) * 255.0 / np.maximum(alpha, 1.0), 0)
             frame = Image.fromarray(np.dstack([np.clip(rgb, 0, 255), alpha]).astype(np.uint8), "RGBA")
@@ -307,7 +310,7 @@ class PuppetAvatarProvider(AvatarProvider):
             mx, my, mw = m["mouth"]
             cx, cy = moved(mx, my)
             if photo:
-                h_px = a * jaw_max * size + 0.004 * size * (1 if a > 0.02 else 0)  # exactly the gap the warp opens
+                h_px = a * jaw_max * size + 0.004 * m.get("motion_scale", 1.0) * size * (1 if a > 0.02 else 0)  # the gap the warp opens
                 width_px = mw * size * (1.0 - 0.10 * a)
                 off = None
                 if m.get("seam"):
@@ -363,56 +366,103 @@ class CommandAvatarProvider(AvatarProvider):
         proc.wait()
 
 
+def _engine_input(image_path: Path, m: dict, workdir: Path, seed: int) -> tuple[Path, Image.Image]:
+    """Image to hand to an external video model, plus the square canvas it came from. Original-photo framing: exactly
+    the framed photo (its own background). Cut-out framing: the cut-out on neutral grey (easy to segment back out)."""
+    canvas = Image.open(image_path).convert("RGBA")
+    if canvas.width != canvas.height:
+        side = max(canvas.size)
+        sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        sq.paste(canvas, ((side - canvas.width) // 2, (side - canvas.height) // 2))
+        canvas = sq
+    pf = m.get("photo_frame")
+    if pf:
+        src_img = canvas.crop((pf["x"], pf["y"], pf["x"] + pf["W"], pf["y"] + pf["H"])).convert("RGB")
+    else:
+        src_img = Image.new("RGB", canvas.size, (128, 128, 128))
+        src_img.paste(canvas, (0, 0), canvas)
+        src_img = src_img.resize((512, 512), Image.LANCZOS)
+    src = workdir / f"engine_src_{seed}.png"
+    src_img.save(src)
+    return src, canvas
+
+
+def _frames_from_video(video: Path, canvas: Image.Image, m: dict, wav: Path, size: int, fps: int, n_frames: int,
+                       seed: int, gestures: bool) -> Iterator[Image.Image]:
+    """Decode an engine's output into `n_frames` RGBA frames of size x size, matching the built-in provider's contract."""
+    from . import segment
+
+    pf = m.get("photo_frame")
+    base = canvas.resize((size, size), Image.LANCZOS)
+    if pf:  # output covers the framed photo region of the (opaque) square canvas
+        k = size / canvas.width
+        fx, fy, fw_, fh_ = round(pf["x"] * k), round(pf["y"] * k), round(pf["W"] * k), round(pf["H"] * k)
+        vw, vh = fw_ - fw_ % 2, fh_ - fh_ % 2
+    else:
+        vw = vh = size
+        kk = max(3, int(size * 0.04)) | 1
+        allowed = cv2.dilate(np.asarray(base.getchannel("A")), np.ones((kk, kk), np.uint8)).astype(np.float32) / 255
+    env = amplitude_envelope(wav, fps, n_frames)
+    hands = _make_hands(base, m, size, env, fps, seed) if (gestures and not pf) else None
+    proc = subprocess.Popen(
+        [get_settings().ffmpeg_bin, "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},scale={vw}:{vh}",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    nbytes = vw * vh * 3
+    last = None
+    try:
+        for i in range(n_frames):
+            buf = proc.stdout.read(nbytes)
+            if len(buf) == nbytes:
+                rgb = np.frombuffer(buf, np.uint8).reshape(vh, vw, 3)
+                if pf:
+                    frame = base.copy()
+                    frame.paste(Image.fromarray(rgb), (fx, fy))
+                    last = frame
+                else:
+                    prob = segment.person_probability(rgb)
+                    alpha = (np.clip((prob - 0.3) / 0.4, 0, 1) if prob is not None else allowed) * allowed
+                    last = Image.fromarray(np.dstack([rgb, (alpha * 255).astype(np.uint8)]), "RGBA")
+            if last is None:
+                raise RuntimeError("the engine's output video could not be decoded")
+            frame = last.copy() if hands is not None else last
+            if hands is not None:
+                hands.draw(frame, i / fps, lambda hx, hy: (0.0, 0.0))
+            yield frame
+    finally:
+        proc.stdout.close()
+        proc.wait()
+
+
 class SadTalkerAvatarProvider(AvatarProvider):
-    """Neural lip-sync via SadTalker. The prepared avatar (cut-out, closed mouth, normalised face) is put on neutral grey,
-    animated by SadTalker, then each output frame is cut out again with the person-segmentation model so it can be
-    composited onto the scenery like the built-in avatar. Hand gestures are overlaid the same way."""
+    """Neural lip-sync via a local SadTalker install (see setup-sadtalker.ps1)."""
 
     name = "sadtalker"
 
     def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0, gestures=True):
-        from . import sadtalker, segment
+        from . import sadtalker
 
         m = {**DEFAULT_META, **(meta or {})}
-        canvas = Image.open(image_path).convert("RGBA")
-        if canvas.width != canvas.height:
-            side = max(canvas.size)
-            sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-            sq.paste(canvas, ((side - canvas.width) // 2, (side - canvas.height) // 2))
-            canvas = sq
-        src_img = Image.new("RGB", canvas.size, (128, 128, 128))
-        src_img.paste(canvas, (0, 0), canvas)
-        src = workdir / f"sadtalker_src_{seed}.png"
-        src_img.resize((512, 512), Image.LANCZOS).save(src)
+        src, canvas = _engine_input(image_path, m, workdir, seed)
         video = sadtalker.run(src, wav, workdir / f"sadtalker_{seed}")
+        yield from _frames_from_video(video, canvas, m, wav, size, fps, n_frames, seed, gestures)
 
-        base = canvas.resize((size, size), Image.LANCZOS)
-        k = max(3, int(size * 0.04)) | 1
-        allowed = cv2.dilate(np.asarray(base.getchannel("A")), np.ones((k, k), np.uint8)).astype(np.float32) / 255
-        env = amplitude_envelope(wav, fps, n_frames)
-        hands = _make_hands(base, m, size, env, fps, seed) if gestures else None
-        proc = subprocess.Popen(
-            [get_settings().ffmpeg_bin, "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},scale={size}:{size}",
-             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-        nbytes = size * size * 3
-        last = None
-        try:
-            for i in range(n_frames):
-                buf = proc.stdout.read(nbytes)
-                if len(buf) == nbytes:
-                    rgb = np.frombuffer(buf, np.uint8).reshape(size, size, 3)
-                    prob = segment.person_probability(rgb)
-                    alpha = (np.clip((prob - 0.3) / 0.4, 0, 1) if prob is not None else allowed) * allowed
-                    last = Image.fromarray(np.dstack([rgb, (alpha * 255).astype(np.uint8)]), "RGBA")
-                if last is None:  # SadTalker produced nothing usable
-                    raise RuntimeError("SadTalker output video could not be decoded")
-                frame = last.copy() if hands is not None else last
-                if hands is not None:
-                    hands.draw(frame, i / fps, lambda hx, hy: (0.0, 0.0))
-                yield frame
-        finally:
-            proc.stdout.close()
-            proc.wait()
+
+class RemoteGPUProvider(AvatarProvider):
+    """Runs a neural engine on a remote GPU worker (the free Google Colab notebook): EchoMimicV2 (half body with hand
+    gestures, closest to HeyGen) or SadTalker (face)."""
+
+    def __init__(self, engine: str):
+        self.engine = engine
+        self.name = f"gpu_{engine}"
+
+    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0, gestures=True):
+        from . import remote_gpu
+
+        m = {**DEFAULT_META, **(meta or {})}
+        src, canvas = _engine_input(image_path, m, workdir, seed)
+        video, msg = remote_gpu.render(self.engine, src, wav, workdir / f"gpu_{seed}.mp4", fps)
+        self.last_message = msg
+        yield from _frames_from_video(video, canvas, m, wav, size, fps, n_frames, seed, gestures)
 
 
 def get_provider(engine: str | None = None) -> AvatarProvider:
@@ -420,4 +470,6 @@ def get_provider(engine: str | None = None) -> AvatarProvider:
         return CommandAvatarProvider()
     if engine == "sadtalker":
         return SadTalkerAvatarProvider()
+    if engine in ("gpu_echomimic", "gpu_sadtalker"):
+        return RemoteGPUProvider(engine[4:])
     return PuppetAvatarProvider()

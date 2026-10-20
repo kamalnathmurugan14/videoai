@@ -19,6 +19,10 @@ export default function SystemCheck() {
   const [busy, setBusy] = useState(false)
   const [sad, setSad] = useState(null)
   const [sadBusy, setSadBusy] = useState(false)
+  const [gpuUrl, setGpuUrl] = useState('')
+  const [gpuToken, setGpuToken] = useState('')
+  const [gpu, setGpu] = useState(null)
+  const [gpuBusy, setGpuBusy] = useState(false)
   useEffect(() => { api.system().then(setInfo).catch((e) => setError(e.message)) }, [])
 
   const testVoices = async () => {
@@ -32,6 +36,13 @@ export default function SystemCheck() {
     setError('')
     try { setSad(await api.sadtalkerCheck()) } catch (e) { setError(e.message) } finally { setSadBusy(false) }
   }
+
+  const gpuAction = async (fn) => {
+    setGpuBusy(true)
+    setError('')
+    try { setGpu(await fn()); setInfo(await api.system()) } catch (e) { setError(e.message) } finally { setGpuBusy(false) }
+  }
+  const colabLink = 'https://colab.research.google.com/github/kamalnathmurugan14/videoai/blob/main/colab/VideoAI_GPU_worker.ipynb'
 
   if (!info) return error ? <div className="mx-auto max-w-2xl p-8"><ErrorBox>{error}</ErrorBox></div> : <PageLoader />
   return (
@@ -49,6 +60,32 @@ export default function SystemCheck() {
           detail={info.sadtalker.ready ? `Installed (${info.sadtalker.size}px${info.sadtalker.enhancer ? ', face enhancer on' : ''}). Use the button below to run a real test.`
             : <>Optional. To enable it, run <code>.\setup-sadtalker.ps1</code> in the project folder, then restart the backend.{info.sadtalker.configured && <> Missing: {info.sadtalker.problems.join('; ')}</>}</>} />
       </ul>
+      <div className="card mt-6 p-5">
+        <h2 className="font-semibold">GPU worker (free Google Colab) — for HeyGen-like videos</h2>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
+          <li>Open the notebook in Colab: <a href={colabLink} target="_blank" rel="noreferrer" className="text-brand-600 underline">VideoAI_GPU_worker.ipynb</a> (if the link does not open, upload <code>colab/VideoAI_GPU_worker.ipynb</code> from the project folder via Colab's <i>File → Upload notebook</i>).</li>
+          <li>In Colab: <i>Runtime → Change runtime type → T4 GPU</i>, then <i>Runtime → Run all</i> (first run ~20–30 min).</li>
+          <li>Copy the <b>URL</b> and <b>TOKEN</b> printed by the last cells into the fields below and press Connect. Keep the Colab tab open while rendering.</li>
+        </ol>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_200px_auto]">
+          <input className="input" placeholder="https://something.trycloudflare.com" value={gpuUrl} onChange={(e) => setGpuUrl(e.target.value)} aria-label="GPU worker URL" />
+          <input className="input" placeholder="TOKEN" value={gpuToken} onChange={(e) => setGpuToken(e.target.value)} aria-label="GPU worker token" />
+          {user ? <button className="btn-primary" disabled={gpuBusy || !gpuUrl} onClick={() => gpuAction(() => api.connectGpu(gpuUrl, gpuToken))}>{gpuBusy && <Spinner className="h-4 w-4 text-white" />} Connect</button>
+            : <Link to="/login" className="btn-secondary">Log in</Link>}
+        </div>
+        {info.remote_gpu?.configured && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            <span>Connected to <code>{info.remote_gpu.url}</code></span>
+            <button className="btn-secondary !py-1" disabled={gpuBusy} onClick={() => gpuAction(api.checkGpu)}>Test connection</button>
+            <button className="btn-danger !py-1" disabled={gpuBusy} onClick={() => gpuAction(async () => { await api.disconnectGpu(); return null })}>Disconnect</button>
+          </div>
+        )}
+        {gpu && (gpu.ok ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            ✓ GPU worker reachable — GPU: <b>{gpu.health.gpu}</b>. Engines: {Object.entries(gpu.health.engines).map(([k, v]) => `${k} ${v.ready ? '✓' : '✗ ' + (v.problems || []).join(', ')}`).join(' · ')}
+          </div>
+        ) : <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{gpu.error}</p>)}
+      </div>
       {info.sadtalker.ready && (
         <div className="card mt-6 p-5">
           <div className="flex items-center justify-between gap-3">

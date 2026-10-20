@@ -91,6 +91,15 @@ function BackgroundPicker({ value, onChange, assets, onAsset, gradients, setErro
 
 /* ---------- live preview ---------- */
 function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset, sceneries }) {
+  const photoAsset = p.framing === 'photo' && p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id) : null
+  if (photoAsset?.full_url) {
+    return (
+      <div className={`relative mx-auto w-full overflow-hidden rounded-xl bg-slate-900 shadow-lg ${p.aspect_ratio !== '16:9' ? 'max-w-[260px]' : ''}`} style={{ aspectRatio: ASPECT_CSS[p.aspect_ratio] }}>
+        <img src={mediaUrl(photoAsset.full_url)} alt="Your photo" className="absolute inset-0 h-full w-full object-cover object-top" />
+        {p.captions_enabled && <div className="absolute inset-x-0 bottom-[12%] text-center text-sm font-extrabold text-white [-webkit-text-stroke:2px_black] [paint-order:stroke_fill]">Your captions appear here</div>}
+      </div>
+    )
+  }
   const scene = p.scenes[sceneIdx]
   const bg = scene?.background || p.background
   const words = (scene?.text || 'Your captions appear here').split(/\s+/).slice(0, 6)
@@ -314,7 +323,7 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
             </select>
           </label>
           <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-brand-600" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} /> Remove photo background</label>
-          <UploadButton kind="avatar" label="Upload photo" extra={{ gender, remove_bg: removeBg }} setError={setError} onUploaded={(a) => { onAsset(a); chooseAvatar(`asset:${a.id}`, a.gender) }} />
+          <UploadButton kind="avatar" label="Upload photo" extra={{ gender, remove_bg: removeBg }} setError={setError} onUploaded={(a) => { onAsset(a); chooseAvatar(`asset:${a.id}`, a.gender, true) }} />
         </div>
         {mine.length > 0 && (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -410,16 +419,32 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
       <section>
         <h3 className="mb-2 font-semibold">Animation engine</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          {[['builtin', 'Built-in (fast)', 'Instant 2D animation of your photo. Works on any computer.', true],
-            ['sadtalker', 'Realistic lip-sync (SadTalker)', cfg?.sadtalker_ready ? 'Neural model: real mouth shapes, expressions and head motion. Slow without an NVIDIA GPU.' : 'Not installed on this server. Run setup-sadtalker.ps1, then restart the backend.', cfg?.sadtalker_ready]].map(([id, name, desc, enabled]) => (
+          {[['gpu_echomimic', 'HeyGen-like (EchoMimicV2, Colab GPU)', cfg?.remote_gpu ? 'Neural half-body video: real mouth, head and hand gestures. Runs on the free Colab GPU; slow (minutes per scene).' : 'Connect the free Google Colab GPU worker on the System check page first.', cfg?.remote_gpu],
+            ['gpu_sadtalker', 'Realistic face (SadTalker, Colab GPU)', cfg?.remote_gpu ? 'Neural lip-sync and head motion on the Colab GPU (~1 min per scene).' : 'Needs the Colab GPU worker (System check).', cfg?.remote_gpu],
+            ['sadtalker', 'Realistic face (SadTalker, this PC)', cfg?.sadtalker_ready ? 'Neural lip-sync on this computer. Very slow without an NVIDIA GPU.' : 'Not installed on this server (setup-sadtalker.ps1).', cfg?.sadtalker_ready],
+            ['builtin', 'Built-in (fast)', 'Instant 2D animation of your photo. Works on any computer; good for drafts.', true]].map(([id, name, desc, enabled]) => (
             <button key={id} type="button" disabled={!enabled} onClick={() => set({ animation_engine: id })} aria-pressed={p.animation_engine === id}
               className={`rounded-xl border-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${p.animation_engine === id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}>
               <div className="text-sm font-semibold">{name}</div><div className="text-xs text-slate-500">{desc}</div>
             </button>
           ))}
         </div>
-        {!cfg?.sadtalker_ready && <p className="mt-2 text-xs"><Link to="/system" className="text-brand-600 underline">How to enable realistic lip-sync →</Link></p>}
+        {!cfg?.remote_gpu && <p className="mt-2 text-xs"><Link to="/system" className="text-brand-600 underline">Connect the free Colab GPU for HeyGen-like videos →</Link></p>}
       </section>
+      {p.avatar_id.startsWith('asset:') && (
+        <section>
+          <h3 className="mb-2 font-semibold">Framing</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[['photo', 'Original photo (HeyGen style)', 'Your photo with its own background fills the frame.'],
+              ['scene', 'Cut-out on a background', 'You are cut out and placed on the scenery / colour you pick.']].map(([id, name, desc]) => (
+              <button key={id} type="button" onClick={() => set({ framing: id })} aria-pressed={p.framing === id}
+                className={`rounded-xl border-2 p-3 text-left ${p.framing === id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div className="text-sm font-semibold">{name}</div><div className="text-xs text-slate-500">{desc}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <section>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="font-semibold">Body language</h3>
@@ -524,8 +549,10 @@ export default function Editor() {
   }
 
   // picking an avatar also switches to a voice of the matching gender (same locale when possible)
-  const chooseAvatar = (avatarId, gender) => {
+  const chooseAvatar = (avatarId, gender, freshUpload = false) => {
     const patch = { avatar_id: avatarId }
+    if (freshUpload) Object.assign(patch, { framing: 'photo', aspect_ratio: '9:16', captions_enabled: false, gestures_enabled: false, intro_enabled: false })
+    if (!avatarId.startsWith('asset:')) patch.framing = 'scene'
     const cur = voices.find((v) => v.id === p.voice)
     if (gender && cur && cur.gender !== gender) {
       const alt = voices.find((v) => v.gender === gender && v.id.slice(0, 5) === p.voice.slice(0, 5)) || voices.find((v) => v.gender === gender)
@@ -538,7 +565,7 @@ export default function Editor() {
     const body = {
       title: p.title, aspect_ratio: p.aspect_ratio, avatar_id: p.avatar_id, voice: p.voice, speed: p.speed,
       captions_enabled: p.captions_enabled, caption_style: p.caption_style, music_volume: p.music_volume,
-      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', gestures_enabled: p.gestures_enabled, animation_engine: p.animation_engine, clear_music: !p.music_id, music_id: p.music_id || undefined,
+      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', gestures_enabled: p.gestures_enabled, animation_engine: p.animation_engine, framing: p.framing, clear_music: !p.music_id, music_id: p.music_id || undefined,
       scenes: p.scenes.map((s) => ({ text: s.text, background: s.background, media_asset_id: s.media_asset_id })),
     }
     const saved = await api.updateProject(id, body)

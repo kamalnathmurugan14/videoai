@@ -47,9 +47,12 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
     up = storage.subdir("uploads")
     paths = {aid: up / a.filename for aid, a in assets.items()}
     avatar_meta: dict = {}
+    full_path = None
     if project.avatar_id.startswith("asset:") and project.avatar_id[6:] in paths:
         avatar_path = paths[project.avatar_id[6:]]
         avatar_meta = assets[project.avatar_id[6:]].meta or {}
+        if avatar_meta.get("full", {}).get("file"):
+            full_path = up / avatar_meta["full"]["file"]
     else:
         av = catalog.get_avatar(project.avatar_id) or catalog.load_avatars()[0]
         avatar_path, avatar_meta = ASSETS_DIR / "avatars" / av["image"], av
@@ -68,6 +71,7 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
         caption_style=project.caption_style, music_path=music_path, music_volume=project.music_volume,
         intro_enabled=project.intro_enabled, intro_title=project.intro_title or project.title,
         gestures_enabled=project.gestures_enabled, animation_engine=project.animation_engine,
+        framing=project.framing, photo_full_path=full_path,
     )
     return spec, paths
 

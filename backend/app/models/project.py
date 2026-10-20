@@ -28,6 +28,7 @@ class Project(Base):
     intro_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
     gestures_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
     animation_engine: Mapped[str] = mapped_column(String(16), default="builtin", server_default="builtin")
+    framing: Mapped[str] = mapped_column(String(10), default="scene", server_default="scene")
     video_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)

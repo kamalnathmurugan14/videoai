@@ -9,7 +9,7 @@ from ..config import get_settings
 from ..deps import client_ip, get_current_user
 from ..models import User
 from ..schemas.misc import ImportText, ImportUrl, VoicePreview
-from ..services import catalog, landmarks, music, sadtalker, script_import, storage, tts
+from ..services import catalog, landmarks, music, remote_gpu, sadtalker, script_import, storage, tts
 
 router = APIRouter(tags=["catalog"])
 _hits: dict[str, deque] = defaultdict(deque)
@@ -34,6 +34,7 @@ def config():
         "llm_enabled": bool(s.anthropic_api_key),
         "face_tracking": landmarks._interpreters() is not None,
         "sadtalker_ready": sadtalker.status()["ready"],
+        "remote_gpu": remote_gpu.configured(),
     }
 
 
