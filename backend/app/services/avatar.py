@@ -112,13 +112,9 @@ def draw_eyelids(img: Image.Image, eyes, skins, size: int, closed: float, photo:
 
 
 def lens_profile(us: np.ndarray, mouth_w: float, fw: float, size: int) -> np.ndarray:
-    """Normalised (0..1) lower-edge profile of the opening across the mouth: the same gaussian the jaw warp uses,
-    re-scaled so it reaches zero at the lip corners. `us` in [-1, 1] spans the opening width."""
-    sigma = fw * 0.20 * size
-    half = mouth_w * 0.5
-    g = np.exp(-0.5 * (us * half / sigma) ** 2)
-    gh = math.exp(-0.5 * (half / sigma) ** 2)
-    return np.clip((g - gh) / (1 - gh), 0, 1)
+    """Normalised (0..1) lower-edge profile of the opening across the mouth: rounded (half-ellipse) so it reads as an open
+    mouth rather than a V. `us` in [-1, 1] spans the opening width."""
+    return np.clip(1 - np.abs(us) ** 2.2, 0, 1) ** 0.62
 
 
 def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height: float, a: float, fw: float, size: int) -> None:
@@ -152,14 +148,19 @@ def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height
     layer = Image.fromarray(arr, "RGBA")
     feat = Image.new("RGBA", (W, H), (0, 0, 0, 0))  # teeth / tongue drawn separately so they can be softened
     d = ImageDraw.Draw(feat)
-    if height > width * 0.06:  # upper teeth: dim, short, blending into the shadow below (not a bright bar)
-        th = height * 0.30
-        for k in range(int(th * ss)):
-            shade = 1 - 0.55 * (k / max(1, th * ss)) ** 1.4
-            d.line([(ox - half * 0.52 * ss, oy + k), (ox + half * 0.52 * ss, oy + k)],
-                   fill=(int(170 * shade), int(160 * shade), int(148 * shade), int(215 * shade + 15)))
+    if height > width * 0.06:  # upper teeth: a soft, shaded band that follows the curved top edge and fades into the cavity
+        tprof = np.clip(1 - np.abs(us) ** 2.4, 0, 1) ** 0.5
+        th = height * 0.34
+        for j in range(n - 1):
+            x0, x1 = xs[j], xs[j + 1]
+            hh = th * float(tprof[j]) * 0.82 * ss
+            if hh < 1:
+                continue
+            for k in range(int(hh)):
+                shade = 1 - 0.55 * (k / max(1.0, hh)) ** 1.3
+                d.line([(x0, oy + k), (x1, oy + k)], fill=(int(176 * shade), int(166 * shade), int(152 * shade), int(225 * shade + 10)))
     if a > 0.75 and height > width * 0.14:  # tongue, dark and soft
-        d.ellipse([ox - half * 0.36 * ss, oy + height * 0.58 * ss, ox + half * 0.36 * ss, oy + height * 1.0 * ss], fill=(118, 46, 56, 220))
+        d.ellipse([ox - half * 0.38 * ss, oy + height * 0.52 * ss, ox + half * 0.38 * ss, oy + height * 0.92 * ss], fill=(118, 46, 56, 215))
     feat = feat.filter(ImageFilter.GaussianBlur(0.9 * ss))
     layer = Image.alpha_composite(layer, feat)
     layer.putalpha(cav.filter(ImageFilter.GaussianBlur(0.7 * ss)))
@@ -248,7 +249,7 @@ class PuppetAvatarProvider(AvatarProvider):
         rng = np.random.default_rng(seed + 7)
         ph = rng.uniform(0, 2 * math.pi, 8)
         blink_period = 3.1 + rng.uniform(0, 1.4)
-        jaw_max = 0.115 * m["face_w"]
+        jaw_max = 0.115 * m["face_w"] * (0.6 if m.get("open") else 1.0)  # smiling/open photos already show teeth: move less
         photo = not m["has_mouth_art"]
 
         gain = size  # normalised -> pixels
@@ -297,7 +298,7 @@ class PuppetAvatarProvider(AvatarProvider):
             cx, cy = moved(mx, my)
             if photo:
                 h_px = a * jaw_max * size + 0.004 * size * (1 if a > 0.02 else 0)  # exactly the gap the warp opens
-                draw_open_mouth(frame, cx, cy, mw * size * (0.86 - 0.10 * a), h_px, a, m["face_w"], size)
+                draw_open_mouth(frame, cx, cy, mw * size * (1.0 - 0.10 * a), h_px, a, m["face_w"], size)
             else:
                 draw_mouth(frame, cx, cy, mw * size, a)
             if closed > 0 and m["eyes"]:

@@ -252,6 +252,10 @@ function MouthTuner({ asset, onAsset, setError }) {
         <h3 className="font-semibold">Fine-tune the mouth</h3>
         <span className="text-xs text-slate-400">{saving ? 'Saving…' : 'Saved'}</span>
       </div>
+      {asset.detection === 'landmarks'
+        ? <p className="mt-1 text-xs font-medium text-emerald-700">✓ Face tracked precisely (478 landmarks), so the mouth is usually already in the right place.</p>
+        : <p className="mt-1 text-xs font-medium text-amber-700">Basic face detection was used. Please check the green line sits on the lips and adjust it.</p>}
+      {asset.warning && <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">⚠ {asset.warning}</p>}
       <p className="mt-1 text-sm text-slate-500">Move the green line onto the seam between the lips (closed mouth). The mouth opens downward from it.</p>
       <div className="mt-3 flex flex-wrap gap-5">
         <div className="relative aspect-square w-60 overflow-hidden rounded-xl bg-gradient-to-br from-brand-100 to-slate-100">
@@ -280,7 +284,7 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
         <img src={mediaUrl(url)} alt={name} className="aspect-square w-full object-contain" />
         <span className="block truncate pb-1 text-center text-sm font-medium">{name}{g ? ` · ${g}` : ''}</span>
       </button>
-      {warn && <span title={warn} className="absolute left-1 top-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700 shadow">⚠ no face found</span>}
+      {warn && <span title={warn} className="absolute left-1 top-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700 shadow">⚠ check photo</span>}
       {onDelete && <button onClick={onDelete} aria-label="Delete upload" className="absolute right-1 top-1 rounded-full bg-white/90 px-1.5 text-red-600 shadow">×</button>}
     </div>
   )
@@ -309,7 +313,7 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
         {mine.length > 0 && (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {mine.map((a) => <Tile key={a.id} id={`asset:${a.id}`} url={a.url} name={a.name || 'Upload'} gender={a.gender}
-              warn={a.face_found === false ? 'No face was detected, so the mouth position is a guess. Try a clearer front-facing photo.' : null} onDelete={() => removeAsset(a)} />)}
+              warn={a.warning || (a.face_found === false ? 'No face was detected, so the mouth position is a guess. Try a clearer front-facing photo.' : null)} onDelete={() => removeAsset(a)} />)}
           </div>
         )}
       </section>

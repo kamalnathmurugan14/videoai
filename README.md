@@ -112,9 +112,12 @@ AVATAR_COMMAND=python /opt/sadtalker/inference.py --source_image {image} --drive
 - **Animation is a 2D puppet, not a neural model.** The mouth opens with the audio loudness (not phoneme/viseme-accurate),
   and head/body/eye motion is procedural. Hand gestures are *drawn* illustrated hands (skin tone sampled from the photo, sleeve colour from the clothing) that
   point/count/explain per spoken phrase; they are not the person's real hands and not pose-tracked (toggle them off in
-  Look & feel). Rendering with gestures takes roughly twice as long. Photo animation uses OpenCV Haar face/eye
-  detection plus proportions for the mouth position, so it works best with a clear, front-facing, evenly lit photo; when no
-  face is found the editor warns you and the mouth position is a guess. The mouth position comes from the detected face
+  Look & feel). Rendering with gestures takes roughly twice as long. Photo animation locates the face with Google's MediaPipe
+  BlazeFace + 478-point Face Mesh models (Apache-2.0 TFLite files in `backend/assets/models`, run locally via
+  `ai-edge-litert`), which gives the exact lip seam, mouth corners, eyes and jaw for any pose; tilted photos are rotated
+  upright first, tiny faces in wide shots are found by scanning tiles / zooming in. If that runtime is unavailable it
+  falls back to OpenCV Haar cascades + proportions (less precise); when no face is found, or the head is strongly
+  turned/tilted, the editor warns you. It works best with a clear, front-facing photo. The mouth position comes from the detected face
   box; use the **Fine-tune the mouth** sliders in the Avatar tab to line it up exactly with the lip seam. Background removal uses GrabCut (good for plain
   backdrops, rough on busy ones; untick "Remove photo background" to keep the original). Plug in SadTalker/Wav2Lip via
   `AVATAR_PROVIDER=command` for true lip-sync.

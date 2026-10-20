@@ -28,3 +28,4 @@ storage/
 .DS_Store
 .idea/
 .vscode/
+sample_output/

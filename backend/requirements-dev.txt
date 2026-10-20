@@ -1,2 +1,3 @@
 -r requirements.txt
 pytest>=8
+scikit-image>=0.22  # optional: provides a public-domain face photo (astronaut) for the landmark regression tests

@@ -28,13 +28,15 @@ class AssetOut(BaseModel):
     gender: str | None = None
     face_found: bool | None = None  # avatars: was a face detected (animation quality depends on it)
     background_removed: bool | None = None
+    detection: str | None = None  # landmarks | haar | guess
+    warning: str | None = None
     mouth: list[float] | None = None  # [x, y, width] as fractions of the (square) avatar image
 
 
 def _out(a: MediaAsset) -> AssetOut:
     m = a.meta or {}
     return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height,
-                    name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"),
+                    name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"), detection=m.get("source"), warning=m.get("warning"),
                     mouth=m.get("mouth"))
 
 
