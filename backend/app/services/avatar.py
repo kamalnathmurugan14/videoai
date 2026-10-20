@@ -111,26 +111,53 @@ def draw_eyelids(img: Image.Image, eyes, skins, size: int, closed: float, photo:
 
 
 def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height: float, a: float) -> None:
-    """Inner mouth for photos: dark cavity + teeth + tongue, feathered so it blends with the stretched lips."""
-    if height < 2:
+    """Inner mouth for photos. The opening hangs below the lip seam (cx, cy): lens-shaped, with a shaded cavity,
+    upper teeth and (when wide open) a tongue. Drawn supersampled and feathered so it blends with the photo's lips."""
+    if height < 2.5:
         return
-    pad = int(width * 0.4)
-    pw, ph = int(width + pad * 2), int(height + pad * 2)
-    layer = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    mx, my = pw / 2, ph / 2
-    rx, ry = width * 0.36, height * 0.5
-    d.ellipse([mx - rx, my - ry, mx + rx, my + ry], fill=(52, 12, 20, 240))
-    if height > width * 0.07:
-        d.rectangle([mx - rx * 0.72, my - ry * 0.92, mx + rx * 0.72, my - ry * 0.92 + max(2, height * 0.26)], fill=(236, 230, 222, 235))
-    if a > 0.55:
-        d.ellipse([mx - rx * 0.5, my + ry * 0.1, mx + rx * 0.5, my + ry * 0.95], fill=(165, 66, 78, 235))
-    # clip teeth/tongue to the cavity shape, then feather the edge
+    ss = 3
+    half = width * 0.5
+    pad = int(width * 0.25) + 4
+    pw, ph = int(width + pad * 2), int(height * 1.5 + pad * 2)
+    n = 48
+    us = np.linspace(-1, 1, n)
+    env = np.clip(1 - us ** 2, 0, 1)
+    top = (-height * 0.04 * env) * ss                      # almost flat upper edge, hugging the upper lip
+    bot = (height * (env ** 0.5)) * ss                      # lower edge follows the dropped lower lip
+    ox, oy = pw * ss / 2, (pad + height * 0.15) * ss        # lip seam sits near the top of the patch
+    xs = ox + us * half * ss
+    poly_top = [(x, oy + t) for x, t in zip(xs, top)]
+    poly_bot = [(x, oy + b) for x, b in zip(xs[::-1], bot[::-1])]
+    shape = poly_top + poly_bot
+    layer = Image.new("RGBA", (pw * ss, ph * ss), (0, 0, 0, 0))
     cav = Image.new("L", layer.size, 0)
-    ImageDraw.Draw(cav).ellipse([mx - rx, my - ry, mx + rx, my + ry], fill=255)
-    layer.putalpha(Image.composite(layer.getchannel("A"), Image.new("L", layer.size, 0), cav))
-    layer = layer.filter(ImageFilter.GaussianBlur(max(0.8, height * 0.07)))
-    img.alpha_composite(layer, (int(cx - pw / 2), int(cy - ph / 2)))
+    ImageDraw.Draw(cav).polygon(shape, fill=255)
+    # cavity: dark at the top (shadow under the upper lip) fading to warm red-brown at the bottom
+    grad = np.zeros((ph * ss, pw * ss, 4), np.uint8)
+    rows = np.arange(ph * ss, dtype=np.float32)
+    t = np.clip((rows - (oy - height * 0.1 * ss)) / max(1.0, height * 1.1 * ss), 0, 1)[:, None]
+    grad[..., 0] = (38 + 70 * t).astype(np.uint8)
+    grad[..., 1] = (8 + 18 * t).astype(np.uint8)
+    grad[..., 2] = (14 + 22 * t).astype(np.uint8)
+    grad[..., 3] = 255
+    layer = Image.fromarray(grad, "RGBA")
+    d = ImageDraw.Draw(layer)
+    if height > width * 0.05:  # upper teeth, tinted and shaded rather than a bright bar
+        th = height * 0.30
+        tx0, tx1 = ox - half * 0.62 * ss, ox + half * 0.62 * ss
+        for k in range(int(th * ss)):
+            shade = 1 - 0.28 * k / max(1, th * ss)
+            d.line([(tx0 + k * 0.06, oy - height * 0.1 * ss + k), (tx1 - k * 0.06, oy - height * 0.1 * ss + k)],
+                   fill=(int(214 * shade), int(206 * shade), int(194 * shade), 235))
+    if a > 0.55 and height > width * 0.1:  # tongue
+        d.ellipse([ox - half * 0.46 * ss, oy + height * 0.52 * ss, ox + half * 0.46 * ss, oy + height * 1.15 * ss], fill=(160, 62, 74, 255))
+    mask = cav.filter(ImageFilter.GaussianBlur(0.9 * ss))
+    layer.putalpha(mask)
+    outline = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    ImageDraw.Draw(outline).line(shape + [shape[0]], fill=(52, 16, 20, 150), width=max(1, int(1.4 * ss)))
+    layer = Image.alpha_composite(layer, outline)
+    layer = layer.resize((pw, ph), Image.LANCZOS)
+    img.alpha_composite(layer, (int(cx - pw / 2), int(cy - oy / ss)))
 
 
 # ---------------------------------------------------------------- provider interface
@@ -181,6 +208,8 @@ class PuppetAvatarProvider(AvatarProvider):
             wy = _sstep(my - 0.012, my + 0.03, y) * (1.0 - _sstep(chin - 0.01, chin + 0.07, y))
             wx = np.exp(-0.5 * ((x - mx) / (fw * 0.34)) ** 2)
             dy = dy + wy * wx * p["jaw"]
+            lip = np.exp(-0.5 * (((x - mx) / (fw * 0.22)) ** 2 + ((y - (my - 0.018)) / 0.012) ** 2))
+            dy = dy - 0.10 * p["jaw"] * lip  # upper lip lifts slightly, revealing the teeth
         return dx, dy
 
     def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0):
@@ -243,8 +272,8 @@ class PuppetAvatarProvider(AvatarProvider):
             mx, my, mw = m["mouth"]
             cx, cy = moved(mx, my)
             if photo:
-                h_px = a * jaw_max * size * 0.95
-                draw_open_mouth(frame, cx, cy + h_px * 0.1, mw * size, h_px, a)
+                h_px = a * jaw_max * size * 0.68
+                draw_open_mouth(frame, cx, cy, mw * size * (0.8 - 0.14 * a), h_px, a)  # mouth narrows slightly as it opens
             else:
                 draw_mouth(frame, cx, cy, mw * size, a)
             if closed > 0 and m["eyes"]:

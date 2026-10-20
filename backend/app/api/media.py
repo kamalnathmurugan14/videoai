@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,12 @@ from ..services import media as media_svc, storage
 router = APIRouter(prefix="/media", tags=["media"])
 
 
+class MouthIn(BaseModel):
+    x: float = Field(ge=0.2, le=0.8)  # fractions of the avatar canvas
+    y: float = Field(ge=0.3, le=0.9)
+    width: float = Field(ge=0.06, le=0.4)
+
+
 class AssetOut(BaseModel):
     id: str
     kind: str
@@ -22,12 +28,14 @@ class AssetOut(BaseModel):
     gender: str | None = None
     face_found: bool | None = None  # avatars: was a face detected (animation quality depends on it)
     background_removed: bool | None = None
+    mouth: list[float] | None = None  # [x, y, width] as fractions of the (square) avatar image
 
 
 def _out(a: MediaAsset) -> AssetOut:
     m = a.meta or {}
     return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height,
-                    name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"))
+                    name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"),
+                    mouth=m.get("mouth"))
 
 
 @router.post("", response_model=AssetOut, status_code=201)
@@ -46,6 +54,17 @@ async def upload(kind: str = Form("image"), remove_bg: bool = Form(True), gender
     a = MediaAsset(id=filename.split(".")[0], owner_id=user.id, kind=kind, filename=filename,
                    original_name=(file.filename or "")[:255], width=w, height=h, meta=meta)
     db.add(a)
+    db.commit()
+    return _out(a)
+
+
+@router.put("/{asset_id}/mouth", response_model=AssetOut)
+def set_mouth(asset_id: str, body: MouthIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Fine-tune where the animated mouth is drawn on an uploaded avatar photo."""
+    a = db.get(MediaAsset, asset_id)
+    if not a or a.owner_id != user.id or a.kind != "avatar":
+        raise HTTPException(404, "Not found")
+    a.meta = {**(a.meta or {}), "mouth": [body.x, body.y, body.width]}  # new dict so the JSON change is detected
     db.commit()
     return _out(a)
 

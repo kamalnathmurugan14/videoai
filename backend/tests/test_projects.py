@@ -135,3 +135,16 @@ def test_avatar_upload_reports_meta(client, auth):
     a = r.json()
     assert a["gender"] == "male" and a["face_found"] is False and (a["width"], a["height"]) == (768, 768)
     assert client.post("/api/media", headers=auth, data={"kind": "avatar", "gender": "robot"}, files={"file": ("p.png", buf.getvalue(), "image/png")}).status_code == 422
+
+
+def test_fine_tune_mouth(client, auth, other_auth):
+    import numpy as np
+
+    buf = io.BytesIO()
+    Image.fromarray((np.random.default_rng(2).random((200, 160, 3)) * 255).astype("uint8")).save(buf, "PNG")
+    a = client.post("/api/media", headers=auth, data={"kind": "avatar"}, files={"file": ("p.png", buf.getvalue(), "image/png")}).json()
+    r = client.put(f"/api/media/{a['id']}/mouth", headers=auth, json={"x": 0.5, "y": 0.62, "width": 0.2})
+    assert r.status_code == 200 and r.json()["mouth"] == [0.5, 0.62, 0.2]
+    assert client.get("/api/media?kind=avatar", headers=auth).json()[0]["mouth"] == [0.5, 0.62, 0.2]
+    assert client.put(f"/api/media/{a['id']}/mouth", headers=auth, json={"x": 0.5, "y": 2, "width": 0.2}).status_code == 422
+    assert client.put(f"/api/media/{a['id']}/mouth", headers=other_auth, json={"x": 0.5, "y": 0.6, "width": 0.2}).status_code == 404

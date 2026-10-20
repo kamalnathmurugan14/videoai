@@ -77,6 +77,7 @@ export const api = {
     return request('/media', { method: 'POST', form })
   },
   deleteAsset: (id) => request(`/media/${id}`, { method: 'DELETE' }),
+  setMouth: (id, mouth) => request(`/media/${id}/mouth`, { method: 'PUT', body: mouth }),
   async download(id, title) {
     const res = await request(`/projects/${id}/download`, { raw: true })
     const url = URL.createObjectURL(await res.blob())

@@ -227,6 +227,48 @@ function ImportModal({ onClose, onApply, cfg }) {
   )
 }
 
+function MouthTuner({ asset, onAsset, setError }) {
+  const [m, setM] = useState({ x: asset.mouth[0], y: asset.mouth[1], width: asset.mouth[2] })
+  const [saving, setSaving] = useState(false)
+  const first = useRef(true)
+  useEffect(() => { setM({ x: asset.mouth[0], y: asset.mouth[1], width: asset.mouth[2] }); first.current = true }, [asset.id]) // eslint-disable-line
+  useEffect(() => {
+    if (first.current) { first.current = false; return }
+    const t = setTimeout(async () => {
+      setSaving(true)
+      try { onAsset(await api.setMouth(asset.id, m)) } catch (e) { setError(e.message) } finally { setSaving(false) }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [m]) // eslint-disable-line
+  const Slider = ({ label, k, min, max, step = 0.002 }) => (
+    <label className="block text-sm">
+      <span className="flex justify-between text-slate-600"><span>{label}</span><span>{Math.round(m[k] * 100)}%</span></span>
+      <input type="range" min={min} max={max} step={step} value={m[k]} onChange={(e) => setM({ ...m, [k]: parseFloat(e.target.value) })} className="w-full accent-brand-600" />
+    </label>
+  )
+  return (
+    <section className="card p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">Fine-tune the mouth</h3>
+        <span className="text-xs text-slate-400">{saving ? 'Saving…' : 'Saved'}</span>
+      </div>
+      <p className="mt-1 text-sm text-slate-500">Move the green line onto the seam between the lips (closed mouth). The mouth opens downward from it.</p>
+      <div className="mt-3 flex flex-wrap gap-5">
+        <div className="relative aspect-square w-60 overflow-hidden rounded-xl bg-gradient-to-br from-brand-100 to-slate-100">
+          <img src={mediaUrl(asset.url)} alt="Avatar for mouth adjustment" className="h-full w-full object-contain" />
+          <div className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 border-t-2 border-emerald-400" style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%`, width: `${m.width * 100 * 0.8}%` }} />
+          <div className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400" style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%` }} />
+        </div>
+        <div className="min-w-48 flex-1 space-y-3">
+          <Slider label="Up / down" k="y" min={0.3} max={0.9} />
+          <Slider label="Left / right" k="x" min={0.3} max={0.7} />
+          <Slider label="Mouth width" k="width" min={0.08} max={0.4} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseAvatar }) {
   const mine = assets.filter((a) => a.kind === 'avatar')
   const [gender, setGender] = useState('female')
@@ -248,6 +290,10 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
         <h3 className="mb-3 font-semibold">Choose a presenter</h3>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{avatars.map((a) => <Tile key={a.id} id={a.id} url={a.url} name={a.name} gender={a.gender} />)}</div>
       </section>
+      {(() => {
+        const sel = p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id && a.mouth) : null
+        return sel ? <MouthTuner asset={sel} onAsset={onAsset} setError={setError} /> : null
+      })()}
       <section className="card p-4">
         <h3 className="font-semibold">Use your own photo</h3>
         <p className="mt-1 text-sm text-slate-500">Upload a clear, front-facing photo (PNG, JPG or WebP). We detect the face, can remove the photo background so you stand in the scene, and animate head, eyes and mouth.</p>
@@ -437,7 +483,7 @@ export default function Editor() {
   }, [dirty])
 
   const set = useCallback((patch) => { setP((cur) => ({ ...cur, ...patch })); setDirty(true) }, [])
-  const onAsset = (a) => setAssets((cur) => (cur.some((x) => x.id === a.id) ? cur : [a, ...cur]))
+  const onAsset = (a) => setAssets((cur) => (cur.some((x) => x.id === a.id) ? cur.map((x) => (x.id === a.id ? a : x)) : [a, ...cur]))
   const removeAsset = async (a) => {
     try {
       await api.deleteAsset(a.id)

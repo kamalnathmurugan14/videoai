@@ -42,9 +42,7 @@ def analyze(rgb: np.ndarray) -> dict:
     mid_x = (eyes[0][0] + eyes[1][0]) / 2
     mid_y = (eyes[0][1] + eyes[1][1]) / 2
     dist = abs(eyes[1][0] - eyes[0][0])
-    mouth_cy = fy + fh * 0.80
-    if eyes_found:
-        mouth_cy = (mouth_cy + mid_y + dist * 1.1) / 2
+    mouth_cy = fy + fh * 0.80  # the Haar box runs brow->chin, so the lip seam sits ~80% down it
     mouth = (mid_x, mouth_cy, fw * 0.42)
     chin = fy + fh * 1.04
 
