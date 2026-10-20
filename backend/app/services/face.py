@@ -166,14 +166,19 @@ def close_mouth(rgb: np.ndarray, upper: np.ndarray, lower: np.ndarray) -> tuple[
     if xb - xa < 4:
         return rgb, float((upper[:, 1].mean() + lower[:, 1].mean()) / 2), seam_curve(upper, lower)
     ou, ol = np.argsort(upper[:, 0]), np.argsort(lower[:, 0])
-    xs = np.arange(int(xa), int(np.ceil(xb)) + 1)
+    ext = (xb - xa) * 0.1  # the model's inner corners sit slightly inside the visible teeth/dark corners
+    xs = np.arange(int(max(0, xa - ext)), int(min(w - 1, np.ceil(xb + ext))) + 1)
     u = np.interp(xs, upper[ou, 0], upper[ou, 1])
     lo = np.interp(xs, lower[ol, 0], lower[ol, 1])
     gap = np.clip(lo - u, 0, None)
     seam = (u + lo) / 2
-    grow = np.where(gap > 0.5, np.maximum(1.5, gap * 0.12), 0)  # overshoot slightly so no line of teeth survives at the seam
+    xc, half = (xa + xb) / 2, (xb - xa) / 2 + ext
+    taper = np.clip(1 - ((xs - xc) / max(half, 1e-3)) ** 4, 0, 1)
+    # overshoot so no teeth survive: proportional to the local gap plus a share of the widest gap, tapered to the corners
+    grow = np.maximum(1.5, 0.15 * gap) + 0.3 * gap.max() * taper
     u, lo = u - grow, lo + grow
     gap = np.clip(lo - u, 0, None)
+    xa, xb = float(xs[0]), float(xs[-1])
     R = float(max(4.0, gap.max() * 1.1))  # lip thickness band that gets stretched over the gap
     y0, y1 = int(max(0, u.min() - R - 2)), int(min(h, lo.max() + R + 2))
     map_x, map_y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
