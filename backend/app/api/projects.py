@@ -9,7 +9,7 @@ from ..deps import client_ip, get_current_user
 from ..models import MediaAsset, Project, RenderJob, Scene, User
 from ..schemas.auth import UsageOut
 from ..schemas.project import JobOut, ProjectCreate, ProjectOut, ProjectSummary, ProjectUpdate
-from ..services import catalog, projects as svc, storage
+from ..services import catalog, projects as svc, sadtalker, storage
 
 router = APIRouter(tags=["projects"])
 ACTIVE = ("queued", "rendering")
@@ -104,6 +104,12 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
         p.intro_enabled = body.intro_enabled
     if body.gestures_enabled is not None:
         p.gestures_enabled = body.gestures_enabled
+    if body.animation_engine is not None:
+        if body.animation_engine == "sadtalker":
+            st = sadtalker.status()
+            if not st["ready"]:
+                raise HTTPException(422, "SadTalker is not installed on this server: " + "; ".join(st["problems"]))
+        p.animation_engine = body.animation_engine
     if body.intro_title is not None:
         p.intro_title = body.intro_title.strip() or None
     if body.scenes is not None:
@@ -136,7 +142,7 @@ def duplicate_project(project_id: int, db: Session = Depends(get_db), user: User
         owner_id=user.id, title=f"{src.title} (copy)"[:120], aspect_ratio=src.aspect_ratio, avatar_id=src.avatar_id,
         voice=src.voice, speed=src.speed, captions_enabled=src.captions_enabled, caption_style=src.caption_style,
         music_id=src.music_id, music_volume=src.music_volume, background=src.background,
-        intro_enabled=src.intro_enabled, intro_title=src.intro_title, gestures_enabled=src.gestures_enabled,
+        intro_enabled=src.intro_enabled, intro_title=src.intro_title, gestures_enabled=src.gestures_enabled, animation_engine=src.animation_engine,
         scenes=[Scene(position=s.position, text=s.text, background=s.background, media_asset_id=s.media_asset_id) for s in src.scenes],
     )
     db.add(p)

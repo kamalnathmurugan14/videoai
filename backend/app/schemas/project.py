@@ -49,6 +49,7 @@ class ProjectUpdate(BaseModel):
     intro_enabled: bool | None = None
     intro_title: str | None = Field(default=None, max_length=120)
     gestures_enabled: bool | None = None
+    animation_engine: Literal["builtin", "sadtalker"] | None = None
     scenes: list[SceneIn] | None = None
 
     @field_validator("title")
@@ -99,6 +100,7 @@ class ProjectOut(ProjectSummary):
     intro_enabled: bool
     intro_title: str | None
     gestures_enabled: bool
+    animation_engine: str
     error: str | None
     scenes: list[SceneOut]
     latest_job: JobOut | None

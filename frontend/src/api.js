@@ -55,6 +55,7 @@ export const api = {
   config: () => request('/config'),
   system: () => request('/system'),
   voiceCheck: () => request('/system/voice-check', { method: 'POST' }),
+  sadtalkerCheck: () => request('/system/sadtalker-check', { method: 'POST' }),
   avatars: () => request('/avatars'),
   sceneries: () => request('/sceneries'),
   voices: () => request('/voices'),

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from ..config import APP_VERSION, get_settings
 from ..deps import get_current_user
 from ..models import User
-from ..services import landmarks, segment, storage, tts
+from ..services import catalog, landmarks, sadtalker, segment, storage, tts
 from .catalog import _rate_limit
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -44,6 +44,7 @@ def system_info():
         "ffmpeg": ffmpeg_version,
         "tts_order": s.tts_list,
         "espeak": bool(shutil.which("espeak-ng") or shutil.which("espeak")),
+        "sadtalker": sadtalker.status(),
     }
 
 
@@ -69,3 +70,27 @@ def voice_check(user: User = Depends(get_current_user)):
         finally:
             wav.unlink(missing_ok=True)
     return {"engines": out, "best_quality_available": any(e["engine"] == "edge" and e["ok"] for e in out)}
+
+
+@router.post("/sadtalker-check")
+def sadtalker_check(user: User = Depends(get_current_user)):
+    """Really run SadTalker on a short clip on this machine: proves the install works and shows GPU vs CPU speed."""
+    _rate_limit(f"sadcheck:{user.id}", 2)
+    st = sadtalker.status()
+    if not st["ready"]:
+        return {"ok": False, "error": "Not installed: " + "; ".join(st["problems"]), "device": None}
+    dev = sadtalker.device_info()
+    work = storage.subdir("tmp") / f"sadcheck-{user.id}"
+    storage.rmtree(work)
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        wav = work / "a.wav"
+        tts.synthesize("Hello! This is a quick lip sync test.", "en-US-AriaNeural", 1.0, wav)
+        t = time.time()
+        video = sadtalker.run(catalog.TEST_PORTRAIT, wav, work / "out")
+        secs = round(time.time() - t, 1)
+        rel = f"tmp/sadcheck-{user.id}/result.mp4"
+        Path(storage.root() / rel).write_bytes(video.read_bytes())
+        return {"ok": True, "seconds": secs, "device": dev, "video_url": storage.url_for(rel)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:800], "device": dev}

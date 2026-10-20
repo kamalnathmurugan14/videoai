@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     avatar_provider: str = "amplitude"  # amplitude | command
     avatar_command: str = ""  # e.g. 'python sadtalker/inference.py --image {image} --audio {audio} --out {out}'
     caption_font: str = ""
+    # SadTalker (optional realistic lip-sync engine; installed by setup-sadtalker.ps1 into its own Python 3.10 venv)
+    sadtalker_dir: str = ""  # folder of the SadTalker checkout (contains inference.py and checkpoints/)
+    sadtalker_python: str = ""  # python executable of SadTalker's venv
+    sadtalker_enhancer: str = ""  # "gfpgan" = sharper faces (slower); empty = off
+    sadtalker_size: int = 256  # 256 or 512 (512 needs the 512 checkpoint and more GPU memory)
+    sadtalker_timeout_seconds: int = 3600
 
     # optional LLM for text -> scenes (heuristic summariser is used when unset)
     anthropic_api_key: str = ""
@@ -58,4 +64,4 @@ def get_settings() -> Settings:
 
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-APP_VERSION = "1.5.0"  # shown in the UI footer and /api/system so you can confirm which build is running
+APP_VERSION = "1.6.0"  # shown in the UI footer and /api/system so you can confirm which build is running

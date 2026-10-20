@@ -1,4 +1,5 @@
 """Render pipeline: per scene TTS -> animated avatar frames -> captions -> FFmpeg; then concat + music."""
+import itertools
 import math
 import subprocess
 import wave
@@ -41,6 +42,7 @@ class RenderSpec:
     intro_enabled: bool = True
     intro_title: str = ""
     gestures_enabled: bool = True
+    animation_engine: str = "builtin"  # builtin | sadtalker
 
 
 @dataclass
@@ -199,7 +201,7 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
     fps = s.render_fps
     W, H = dims(spec.aspect_ratio)
     workdir.mkdir(parents=True, exist_ok=True)
-    provider = avatar_mod.get_provider()
+    provider = avatar_mod.get_provider(spec.animation_engine)
     notes: list[str] = []
     scenes = [sc for sc in spec.scenes if sc.text.strip()]
     if not scenes:
@@ -269,11 +271,20 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
                     return cap_cache[key]
             return None
 
-        progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: animating avatar")
+        progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: " + ("realistic lip-sync with SadTalker (can take minutes)"
+                                                                if provider.name == "sadtalker" else "animating avatar"))
         if spec.avatar_path is None:
             raise RenderError("No avatar selected")
         frames_iter = provider.frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames, workdir, seed=si,
                                       gestures=spec.gestures_enabled)
+        if provider.name != avatar_mod.PuppetAvatarProvider.name:
+            try:  # external engines do their heavy work on the first frame: fail over to the built-in animation
+                first = next(frames_iter)
+                frames_iter = itertools.chain([first], frames_iter)
+            except Exception as e:
+                notes.append(f"⚠ Scene {si + 1}: {provider.name} failed ({str(e)[:300]}); used the built-in animation instead")
+                frames_iter = avatar_mod.PuppetAvatarProvider().frames(spec.avatar_path, spec.avatar_meta, wav, size, fps, n_frames,
+                                                                        workdir, seed=si, gestures=spec.gestures_enabled)
         thumb_at = min(n_frames - 1, int((lead + 0.7) * fps)) if si == 0 else None
 
         def raw_frames():

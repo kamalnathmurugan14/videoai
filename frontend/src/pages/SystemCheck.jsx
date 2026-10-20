@@ -17,12 +17,20 @@ export default function SystemCheck() {
   const [error, setError] = useState('')
   const [voices, setVoices] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [sad, setSad] = useState(null)
+  const [sadBusy, setSadBusy] = useState(false)
   useEffect(() => { api.system().then(setInfo).catch((e) => setError(e.message)) }, [])
 
   const testVoices = async () => {
     setBusy(true)
     setError('')
     try { setVoices(await api.voiceCheck()) } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  const testSadTalker = async () => {
+    setSadBusy(true)
+    setError('')
+    try { setSad(await api.sadtalkerCheck()) } catch (e) { setError(e.message) } finally { setSadBusy(false) }
   }
 
   if (!info) return error ? <div className="mx-auto max-w-2xl p-8"><ErrorBox>{error}</ErrorBox></div> : <PageLoader />
@@ -37,7 +45,31 @@ export default function SystemCheck() {
           detail={info.segmentation ? 'Backgrounds are removed while keeping hair, shoulders and clothes.' : 'Not available: a simpler colour-based cut-out is used, which can lose shoulders on busy backgrounds.'} />
         <Row ok={!!info.ffmpeg} label="FFmpeg (video encoding)" detail={info.ffmpeg || 'Not found on PATH: rendering will fail. Install FFmpeg and restart the backend.'} />
         <Row ok label="Voice engines (tried in this order)" detail={info.tts_order.join(' → ')} />
+        <Row ok={info.sadtalker.ready} label="Realistic lip-sync (SadTalker)"
+          detail={info.sadtalker.ready ? `Installed (${info.sadtalker.size}px${info.sadtalker.enhancer ? ', face enhancer on' : ''}). Use the button below to run a real test.`
+            : <>Optional. To enable it, run <code>.\setup-sadtalker.ps1</code> in the project folder, then restart the backend.{info.sadtalker.configured && <> Missing: {info.sadtalker.problems.join('; ')}</>}</>} />
       </ul>
+      {info.sadtalker.ready && (
+        <div className="card mt-6 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Test SadTalker on this computer</h2>
+              <p className="text-sm text-slate-500">Animates a test portrait for a few seconds. Takes ~30 s with an NVIDIA GPU, several minutes on CPU.</p>
+            </div>
+            {user ? <button className="btn-primary" disabled={sadBusy} onClick={testSadTalker}>{sadBusy && <Spinner className="h-4 w-4 text-white" />} Test SadTalker</button>
+              : <Link to="/login" className="btn-secondary">Log in to test</Link>}
+          </div>
+          {sad && (
+            <div className="mt-3 text-sm">
+              {sad.device?.device && <p>Device: <b>{sad.device.device === 'cuda' ? `NVIDIA GPU (${sad.device.gpu})` : 'CPU (slow)'}</b></p>}
+              {sad.ok ? <>
+                <p className="mt-1 text-emerald-700">✓ Works — {sad.seconds}s for the test clip.</p>
+                <video src={sad.video_url} controls className="mt-3 w-64 rounded-lg" />
+              </> : <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">{sad.error}</p>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card mt-6 p-5">
         <div className="flex items-center justify-between gap-3">

@@ -408,6 +408,19 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
         <p className="mt-2 text-xs text-slate-500">Each scene can override this in the Script tab, or use “Vary scenery per scene”.</p>
       </section>
       <section>
+        <h3 className="mb-2 font-semibold">Animation engine</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[['builtin', 'Built-in (fast)', 'Instant 2D animation of your photo. Works on any computer.', true],
+            ['sadtalker', 'Realistic lip-sync (SadTalker)', cfg?.sadtalker_ready ? 'Neural model: real mouth shapes, expressions and head motion. Slow without an NVIDIA GPU.' : 'Not installed on this server. Run setup-sadtalker.ps1, then restart the backend.', cfg?.sadtalker_ready]].map(([id, name, desc, enabled]) => (
+            <button key={id} type="button" disabled={!enabled} onClick={() => set({ animation_engine: id })} aria-pressed={p.animation_engine === id}
+              className={`rounded-xl border-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${p.animation_engine === id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}>
+              <div className="text-sm font-semibold">{name}</div><div className="text-xs text-slate-500">{desc}</div>
+            </button>
+          ))}
+        </div>
+        {!cfg?.sadtalker_ready && <p className="mt-2 text-xs"><Link to="/system" className="text-brand-600 underline">How to enable realistic lip-sync →</Link></p>}
+      </section>
+      <section>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="font-semibold">Body language</h3>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -525,7 +538,7 @@ export default function Editor() {
     const body = {
       title: p.title, aspect_ratio: p.aspect_ratio, avatar_id: p.avatar_id, voice: p.voice, speed: p.speed,
       captions_enabled: p.captions_enabled, caption_style: p.caption_style, music_volume: p.music_volume,
-      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', gestures_enabled: p.gestures_enabled, clear_music: !p.music_id, music_id: p.music_id || undefined,
+      background: p.background, intro_enabled: p.intro_enabled, intro_title: p.intro_title || '', gestures_enabled: p.gestures_enabled, animation_engine: p.animation_engine, clear_music: !p.music_id, music_id: p.music_id || undefined,
       scenes: p.scenes.map((s) => ({ text: s.text, background: s.background, media_asset_id: s.media_asset_id })),
     }
     const saved = await api.updateProject(id, body)

@@ -190,6 +190,14 @@ def _sstep(a: float, b: float, x: np.ndarray) -> np.ndarray:
     return t * t * (3 - 2 * t)
 
 
+def _make_hands(base: Image.Image, m: dict, size: int, env: np.ndarray, fps: int, seed: int):
+    region = np.asarray(base)[int(size * 0.68): int(size * 0.78), int(size * 0.25): int(size * 0.75)].reshape(-1, 4)
+    region = region[region[:, 3] > 150]  # clothing just below the chin / above the faded bottom edge
+    sleeve = tuple(int(v) for v in np.median(region[:, :3], axis=0)) if len(region) else (70, 80, 110)
+    skin_rgb = tuple(int(c * 0.94) for c in _hex(m["skin"]))
+    return gest_mod.HandGestures(size, skin_rgb, sleeve, env, fps, seed)
+
+
 class PuppetAvatarProvider(AvatarProvider):
     name = "amplitude"
     G = 96  # resolution of the coarse displacement grid
@@ -261,13 +269,7 @@ class PuppetAvatarProvider(AvatarProvider):
         photo = not m["has_mouth_art"]
 
         gain = size  # normalised -> pixels
-        hands = None
-        if gestures:
-            region = np.asarray(base)[int(size * 0.68): int(size * 0.78), int(size * 0.25): int(size * 0.75)].reshape(-1, 4)
-            region = region[region[:, 3] > 150]  # clothing just below the chin / above the faded bottom edge
-            sleeve = tuple(int(v) for v in np.median(region[:, :3], axis=0)) if len(region) else (70, 80, 110)
-            skin_rgb = tuple(int(c * 0.94) for c in _hex(m["skin"]))
-            hands = gest_mod.HandGestures(size, skin_rgb, sleeve, env, fps, seed)
+        hands = _make_hands(base, m, size, env, fps, seed) if gestures else None
 
         for i in range(n_frames):
             t = i / fps
@@ -361,5 +363,61 @@ class CommandAvatarProvider(AvatarProvider):
         proc.wait()
 
 
-def get_provider() -> AvatarProvider:
-    return CommandAvatarProvider() if get_settings().avatar_provider == "command" else PuppetAvatarProvider()
+class SadTalkerAvatarProvider(AvatarProvider):
+    """Neural lip-sync via SadTalker. The prepared avatar (cut-out, closed mouth, normalised face) is put on neutral grey,
+    animated by SadTalker, then each output frame is cut out again with the person-segmentation model so it can be
+    composited onto the scenery like the built-in avatar. Hand gestures are overlaid the same way."""
+
+    name = "sadtalker"
+
+    def frames(self, image_path, meta, wav, size, fps, n_frames, workdir, seed=0, gestures=True):
+        from . import sadtalker, segment
+
+        m = {**DEFAULT_META, **(meta or {})}
+        canvas = Image.open(image_path).convert("RGBA")
+        if canvas.width != canvas.height:
+            side = max(canvas.size)
+            sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            sq.paste(canvas, ((side - canvas.width) // 2, (side - canvas.height) // 2))
+            canvas = sq
+        src_img = Image.new("RGB", canvas.size, (128, 128, 128))
+        src_img.paste(canvas, (0, 0), canvas)
+        src = workdir / f"sadtalker_src_{seed}.png"
+        src_img.resize((512, 512), Image.LANCZOS).save(src)
+        video = sadtalker.run(src, wav, workdir / f"sadtalker_{seed}")
+
+        base = canvas.resize((size, size), Image.LANCZOS)
+        k = max(3, int(size * 0.04)) | 1
+        allowed = cv2.dilate(np.asarray(base.getchannel("A")), np.ones((k, k), np.uint8)).astype(np.float32) / 255
+        env = amplitude_envelope(wav, fps, n_frames)
+        hands = _make_hands(base, m, size, env, fps, seed) if gestures else None
+        proc = subprocess.Popen(
+            [get_settings().ffmpeg_bin, "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},scale={size}:{size}",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+        nbytes = size * size * 3
+        last = None
+        try:
+            for i in range(n_frames):
+                buf = proc.stdout.read(nbytes)
+                if len(buf) == nbytes:
+                    rgb = np.frombuffer(buf, np.uint8).reshape(size, size, 3)
+                    prob = segment.person_probability(rgb)
+                    alpha = (np.clip((prob - 0.3) / 0.4, 0, 1) if prob is not None else allowed) * allowed
+                    last = Image.fromarray(np.dstack([rgb, (alpha * 255).astype(np.uint8)]), "RGBA")
+                if last is None:  # SadTalker produced nothing usable
+                    raise RuntimeError("SadTalker output video could not be decoded")
+                frame = last.copy() if hands is not None else last
+                if hands is not None:
+                    hands.draw(frame, i / fps, lambda hx, hy: (0.0, 0.0))
+                yield frame
+        finally:
+            proc.stdout.close()
+            proc.wait()
+
+
+def get_provider(engine: str | None = None) -> AvatarProvider:
+    if get_settings().avatar_provider == "command":
+        return CommandAvatarProvider()
+    if engine == "sadtalker":
+        return SadTalkerAvatarProvider()
+    return PuppetAvatarProvider()

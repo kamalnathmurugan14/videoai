@@ -99,6 +99,9 @@ def get_avatar(avatar_id: str) -> dict | None:
     return next((a for a in load_avatars() if a["id"] == avatar_id), None)
 
 
+TEST_PORTRAIT = ASSETS_DIR / "test" / "portrait.jpg"  # public-domain NASA portrait used by the SadTalker self-test
+
+
 def load_sceneries() -> list[dict]:
     path = ASSETS_DIR / "sceneries" / "sceneries.json"
     return json.loads(path.read_text()) if path.exists() else []

@@ -113,7 +113,26 @@ frontend/src/      pages (Landing, Auth, Dashboard, Editor, VideoDetail), api cl
 queued job (`UPDATE … WHERE status='queued'`), writes progress/stage rows as it goes, and on restart re-queues jobs
 left `running`. The frontend polls `GET /api/projects/{id}` / `GET /api/jobs/{id}`.
 
-**Plugging in a real lip-sync model:** avatar animation sits behind `AvatarProvider` (`services/avatar.py`).
+### Realistic lip-sync with SadTalker (optional)
+
+The built-in engine animates the photo in 2D (fast, any computer). For neural, audio-driven lip-sync, expressions and head
+motion, install [SadTalker](https://github.com/OpenTalker/SadTalker) (Apache-2.0):
+
+```powershell
+# Windows, from the project folder (needs git, FFmpeg and ~6 GB of disk):
+.\setup-sadtalker.ps1          # NVIDIA GPU detected automatically; add -Cpu to force the CPU build
+```
+The script installs Python 3.10 (SadTalker does not support newer Python), clones SadTalker next to this project into its
+own virtualenv with pinned dependencies, downloads the weights, **runs a real self-test**, and writes `SADTALKER_DIR`,
+`SADTALKER_PYTHON`, `SADTALKER_ENHANCER` to `backend/.env`. Restart the backend, check **System check → Test SadTalker**,
+then pick *Look & feel → Animation engine → Realistic lip-sync (SadTalker)* per video. Each scene's photo is animated by
+SadTalker and cut out again per frame, so scenery, captions, intro, music and gestures still apply. If SadTalker fails for
+a scene, that scene falls back to the built-in engine and the reason is shown on the video page.
+
+Speed: roughly 1 minute per 10 s of video on a mid-range NVIDIA GPU; on CPU expect 10+ minutes per 10 s.
+Quality is a clear step up from the built-in engine, but still below commercial tools such as HeyGen.
+
+**Plugging in another lip-sync model:** avatar animation sits behind `AvatarProvider` (`services/avatar.py`).
 The default `amplitude` provider animates the mouth from audio loudness. To use SadTalker / Wav2Lip, install the model
 yourself and set:
 ```
