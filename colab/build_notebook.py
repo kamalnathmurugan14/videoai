@@ -27,15 +27,20 @@ This notebook gives the **VideoAI** app a free NVIDIA GPU so it can generate rea
 
 * **EchoMimicV2** – half body with **hand gestures** from one photo + voice (closest to HeyGen). Apache-2.0.
 * **SadTalker** – realistic face / lip-sync. Apache-2.0. Used automatically if EchoMimicV2 fails (e.g. out of GPU memory).
+* **LatentSync** – real lip-sync for a **video of yourself** (record 10–15 s, upload it as a *video avatar*): your real
+  head and body movement is kept and only the mouth is re-generated to match the voice, like HeyGen's video avatars.
+  It also works on animated photos. Apache-2.0.
 
 **How to use**
 1. Menu **Runtime → Change runtime type → T4 GPU → Save**.
 2. Menu **Runtime → Run all** (first run downloads ~15 GB and takes roughly 20–30 minutes).
 3. The last cell prints a **URL** and a **TOKEN**. In VideoAI open **System check → GPU worker**, paste both, press *Connect*.
-4. In the editor choose **Look & feel → Animation engine → HeyGen-like (EchoMimicV2, Colab GPU)** and render.
+4. In the editor choose **Look & feel → Animation engine**: *Real lip-sync (LatentSync, Colab GPU)* for video avatars
+   (best), or *HeyGen-like (EchoMimicV2, Colab GPU)* for photos, and render.
 5. **Keep this tab open** while rendering. Free Colab disconnects after inactivity / a few hours; then just *Run all* again and paste the new URL.
 
-Rendering on the free T4 GPU is slow (EchoMimicV2: very roughly 10–30 minutes per 10 seconds of video; SadTalker ~1 minute).
+Rendering on the free T4 GPU is slow (EchoMimicV2: very roughly 10–30 minutes per 10 seconds of video; LatentSync a few
+minutes; SadTalker ~1 minute).
 """),
     code("""
 #@title 1. Check the GPU
@@ -45,6 +50,7 @@ Rendering on the free T4 GPU is slow (EchoMimicV2: very roughly 10–30 minutes 
 #@title 2. Options
 INSTALL_ECHOMIMIC = True  #@param {type:"boolean"}
 INSTALL_SADTALKER = True  #@param {type:"boolean"}
+INSTALL_LATENTSYNC = True  #@param {type:"boolean"}
 """, True),
     code("""
 #@title 3. Base tools (ffmpeg, uv, Python 3.10 for the models)
@@ -110,9 +116,33 @@ echo ECHOMIMIC_OK
     print(r.stdout[-3000:], r.stderr[-3000:])
     print("EchoMimicV2 installed" if "ECHOMIMIC_OK" in r.stdout else "EchoMimicV2 install FAILED - the worker will use SadTalker instead")
 """, True),
+    code("""
+#@title 5b. Install LatentSync (real lip-sync for video avatars)
+import subprocess
+if INSTALL_LATENTSYNC:
+    script = r'''
+set -e
+cd /content
+[ -d LatentSync ] || git clone --depth 1 https://github.com/bytedance/LatentSync.git
+[ -x env_latentsync/bin/python ] || uv venv --python 3.10 env_latentsync
+P=/content/env_latentsync/bin/python
+uv pip install --python $P --index-strategy unsafe-best-match -r LatentSync/requirements.txt
+uv pip install --python $P huggingface_hub
+cd LatentSync
+$P - <<'PY'
+from huggingface_hub import hf_hub_download
+for f in ("latentsync_unet.pt", "whisper/tiny.pt"):
+    hf_hub_download("ByteDance/LatentSync-1.5", f, local_dir="checkpoints")
+PY
+echo LATENTSYNC_OK
+'''
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    print(r.stdout[-3000:], r.stderr[-3000:])
+    print("LatentSync installed" if "LATENTSYNC_OK" in r.stdout else "LatentSync install FAILED (see the messages above)")
+""", True),
     code("%%writefile /content/gpu_worker.py\n" + worker, None),
     code("""
-#@title 6. Self-test both engines on their own example files (shows real speed on this GPU)
+#@title 6. Self-test the engines on their own example files (shows real speed on this GPU)
 import glob, os, subprocess, sys, time, wave
 sys.path.insert(0, "/content")
 os.environ["WORKER_STUB"] = "0"
@@ -125,11 +155,24 @@ def short_wav(src, dst, seconds=3):
     w.writeframes(r.readframes(int(r.getframerate() * seconds))); w.close()
 
 job = Path("/content/selftest"); job.mkdir(exist_ok=True)
-for name in ("sadtalker", "echomimic"):
+for name in ("lipsync", "sadtalker", "echomimic"):
     st = gpu_worker.engine_status(name)
     if not st["ready"]:
         print(f"{name}: not installed {st['problems']}"); continue
     d = gpu_worker.ENG[name][0]
+    if name == "lipsync":
+        vids, wavs = sorted(glob.glob(str(d / "assets/*.mp4"))), sorted(glob.glob(str(d / "assets/*.wav")))
+        if not vids or not wavs:
+            print("lipsync: no example files found"); continue
+        short_wav(wavs[0], str(job / "lipsync.wav"))
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", vids[0], "-t", "3", str(job / "lipsync_in.mp4")], check=True)
+        t = time.time()
+        try:
+            out = gpu_worker.run_latentsync(job / "lipsync_in.mp4", job / "lipsync.wav", job)
+            print(f"lipsync: OK, 3 s of video in {time.time() - t:.0f} s -> {out}")
+        except Exception as e:
+            print(f"lipsync: FAILED after {time.time() - t:.0f} s: {e}")
+        continue
     imgs = sorted(glob.glob(str(d / ("examples/source_image/*.png" if name == "sadtalker" else "assets/halfbody_demo/refimag/**/*.png")), recursive=True))
     wavs = sorted(glob.glob(str(d / ("examples/driven_audio/*.wav" if name == "sadtalker" else "assets/halfbody_demo/audio/**/*.wav")), recursive=True))
     if not imgs or not wavs:

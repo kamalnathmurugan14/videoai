@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     storage_dir: Path = Path("./storage")
     max_upload_mb: int = 8
+    max_video_upload_mb: int = 200  # video avatars (10-20 s clips from a phone)
 
     # limits
     render_daily_limit_user: int = 10
@@ -64,4 +65,4 @@ def get_settings() -> Settings:
 
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-APP_VERSION = "1.7.0"  # shown in the UI footer and /api/system so you can confirm which build is running
+APP_VERSION = "1.8.0"  # shown in the UI footer and /api/system so you can confirm which build is running

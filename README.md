@@ -11,7 +11,8 @@ SQLite (default) or PostgreSQL · FFmpeg · edge-tts / gTTS / espeak-ng · Pillo
 - **Auth:** email/password (bcrypt + JWT) and one-click **guest mode**.
 - **Dashboard:** list, create (blank or from template), rename, duplicate, delete, status
   (`draft → queued → rendering → done / failed`), preview player, MP4 download.
-- **Editor:** 6 bundled avatars + upload your own photo (face detection, optional background removal) · multi-scene
+- **Editor:** 6 bundled avatars + upload your own photo (face detection, optional background removal) or a **10–15 s
+  video of yourself (video avatar: your real movement, re-animated mouth)** · multi-scene
   script (per-scene text, background, image) · 8 scenery backgrounds (office, beach, city, forest, ...) assignable per
   scene · male/female voice filter, 24 voices, speed, voice preview that tells you which engine really played ·
   colour / gradient / image backgrounds · intro title card ·
@@ -120,6 +121,7 @@ notebook [`colab/VideoAI_GPU_worker.ipynb`](colab/VideoAI_GPU_worker.ipynb) runs
 
 * **EchoMimicV2** (Apache-2.0): half-body animation with hand gestures from one photo + voice.
 * **SadTalker** (Apache-2.0): face / lip-sync; used automatically when EchoMimicV2 fails (e.g. out of GPU memory).
+* **LatentSync** (Apache-2.0): real lip-sync for video avatars (and animated photos), see below.
 
 1. Open it in Colab: <https://colab.research.google.com/github/kamalnathmurugan14/videoai/blob/main/colab/VideoAI_GPU_worker.ipynb>
 2. *Runtime → Change runtime type → T4 GPU*, then *Runtime → Run all* (first run downloads ~15 GB, ~20–30 min).
@@ -132,6 +134,27 @@ small FastAPI server behind a free Cloudflare quick tunnel; every request needs 
 run the notebook again and paste the new URL. If the worker is unreachable or fails, that scene falls back to the
 built-in engine and the video page says so. EchoMimicV2 drives the hands from its bundled demo pose sequences, so a scene
 can be at most as long as the pose sequence (~10+ s); longer scenes use SadTalker.
+
+### Video avatars: a real video of you speaking (most realistic)
+
+Like HeyGen's video avatars: in the editor's *Avatar* tab choose **Upload video** and pick a 10–15 s clip of yourself
+(MP4/MOV/WebM, up to 200 MB; only the first 20 s are used, the clip's sound is ignored). At upload the clip is converted
+to 25 fps frames and your face is tracked in every frame (Face Mesh), which takes roughly a second per second of video.
+When rendering, the real footage is looped forward-and-backward for as long as the voice lasts, so your **real head,
+body and blink movement** is kept; only the mouth is re-animated:
+
+* **Built-in (CPU):** your own lips are closed with a warp in every frame, then the jaw opens with the voice and an inner
+  mouth (tinted from your lip colour, blurred to the footage's sharpness) is drawn, following the head's position, size
+  and tilt. Fast, works offline, but the mouth is still drawn and loudness-driven.
+* **Real lip-sync (LatentSync, Colab GPU)** — the HeyGen-like result: the looped footage and the voice are sent to the
+  Colab worker, where ByteDance's [LatentSync](https://github.com/bytedance/LatentSync) (Apache-2.0) re-generates the
+  lower face so lips, teeth and jaw match the words. Choose it in *Look & feel → Animation engine*. It also works with
+  photos (the built-in engine supplies the head motion, LatentSync the mouth). If the worker is unreachable the scene
+  falls back to the built-in mouth, and the video page says so.
+
+Recording tips: face the camera at eye level with even light, whole face visible, no hands or hair over the mouth; keep
+your lips relaxed and closed (or a slight smile) and move naturally — small nods, head and shoulder movement. Clips where
+you talk or grin with an open mouth work but look less natural on the CPU engine (you get a warning).
 
 ### Original-photo framing (HeyGen style)
 
@@ -170,7 +193,11 @@ AVATAR_COMMAND=python /opt/sadtalker/inference.py --source_image {image} --drive
 
 ## Known limitations
 
-- **Animation is a 2D puppet, not a neural model.** The mouth opens with the audio loudness (not phoneme/viseme-accurate),
+- **Video avatars on the CPU engine still draw the mouth** (loudness-driven, not phoneme-accurate); the head and body
+  motion is real footage. Use the LatentSync (Colab GPU) engine for real lips. The LatentSync worker code follows the
+  project's documented command line but could not be run in the authoring environment (no GPU, no access to Hugging Face);
+  it was tested with a stand-in that has the same interface. The notebook's self-test cell shows whether it works.
+- **Photo animation is a 2D puppet, not a neural model.** The mouth opens with the audio loudness (not phoneme/viseme-accurate),
   and head/body/eye motion is procedural. Hand gestures are *drawn* illustrated hands (skin tone sampled from the photo, sleeve colour from the clothing) that
   point/count/explain per spoken phrase; they are not the person's real hands and not pose-tracked (toggle them off in
   Look & feel). Rendering with gestures takes roughly twice as long. Photo animation locates the face with Google's MediaPipe

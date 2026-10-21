@@ -1,7 +1,7 @@
 """Client for a remote GPU worker (the VideoAI Colab notebook, or any server speaking the same small protocol):
 
     GET  /health                -> {"ok": true, "gpu": "...", "engines": {"echomimic": {...}, "sadtalker": {...}}}
-    POST /jobs  (multipart)     -> {"id": "..."}       fields: engine, fps; files: image, audio
+    POST /jobs  (multipart)     -> {"id": "..."}       fields: engine, fps; files: image (or video for "lipsync"), audio
     GET  /jobs/{id}             -> {"status": "queued|running|done|failed", "message": "...", "engine_used": "..."}
     GET  /jobs/{id}/video       -> video/mp4
 Every request carries the header X-Token. The URL/token are saved in storage/remote_gpu.json (set from System check)."""
@@ -64,13 +64,15 @@ def health() -> dict:
 
 
 def render(engine: str, image: Path, audio: Path, out: Path, fps: int, timeout_s: int = 3 * 3600, on_status=None) -> tuple[Path, str]:
-    """Run one clip on the worker; returns (mp4 path, message from the worker, e.g. which engine actually ran)."""
+    """Run one clip on the worker; returns (mp4 path, message from the worker, e.g. which engine actually ran).
+    `image` is a PNG, or for engine "lipsync" an MP4 whose lower face gets re-generated to match the audio."""
     client, url = _client(120)
+    field, ctype = ("video", "video/mp4") if image.suffix.lower() == ".mp4" else ("image", "image/png")
     with client:
         try:
             with open(image, "rb") as fi, open(audio, "rb") as fa:
                 r = client.post(f"{url}/jobs", data={"engine": engine, "fps": str(fps)},
-                                files={"image": (image.name, fi, "image/png"), "audio": (audio.name, fa, "audio/wav")})
+                                files={field: (image.name, fi, ctype), "audio": (audio.name, fa, "audio/wav")})
         except httpx.HTTPError as e:
             raise RemoteGPUError(f"could not send the job to the GPU worker ({e.__class__.__name__})")
         if r.status_code >= 400:

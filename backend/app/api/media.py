@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,7 +8,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import MediaAsset, Project, Scene, User
-from ..services import media as media_svc, storage
+from ..services import media as media_svc, storage, video_avatar
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -32,25 +33,33 @@ class AssetOut(BaseModel):
     warning: str | None = None
     mouth: list[float] | None = None  # [x, y, width] as fractions of the (square) avatar image
     full_url: str | None = None  # the original photo (for "original photo" framing)
+    video_url: str | None = None  # video avatars: a small looping preview of the uploaded clip
+    video_seconds: float | None = None
 
 
 def _out(a: MediaAsset) -> AssetOut:
     m = a.meta or {}
     return AssetOut(id=a.id, kind=a.kind, url=f"/storage/uploads/{a.filename}", width=a.width, height=a.height,
                     name=a.original_name, gender=m.get("gender"), face_found=m.get("found"), background_removed=m.get("cutout"), detection=m.get("source"), warning=m.get("warning"),
-                    mouth=m.get("mouth"), full_url=f"/storage/uploads/{m['full']['file']}" if m.get("full", {}).get("file") else None)
+                    mouth=m.get("mouth"), full_url=f"/storage/uploads/{m['full']['file']}" if m.get("full", {}).get("file") else None,
+                    video_url=f"/storage/uploads/{m['video']['preview']}" if m.get("video") else None,
+                    video_seconds=m["video"].get("seconds") if m.get("video") else None)
 
 
 @router.post("", response_model=AssetOut, status_code=201)
 async def upload(kind: str = Form("image"), remove_bg: bool = Form(True), gender: str = Form("female"),
                  file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    if kind not in ("image", "avatar"):
-        raise HTTPException(422, "kind must be 'image' or 'avatar'")
+    if kind not in ("image", "avatar", "avatar_video"):
+        raise HTTPException(422, "kind must be 'image', 'avatar' or 'avatar_video'")
     if gender not in ("female", "male"):
         raise HTTPException(422, "gender must be 'female' or 'male'")
-    data = await file.read(get_settings().max_upload_mb * 1024 * 1024 + 1)
+    s = get_settings()
+    data = await file.read((s.max_video_upload_mb if kind == "avatar_video" else s.max_upload_mb) * 1024 * 1024 + 1)
     meta = None
-    if kind == "avatar":
+    if kind == "avatar_video":  # a 10-20 s clip of the person: stored as an avatar whose meta carries the video track
+        filename, w, h, meta = await run_in_threadpool(video_avatar.ingest, data, gender)
+        kind = "avatar"
+    elif kind == "avatar":
         filename, w, h, meta = media_svc.save_avatar(data, remove_bg, gender)
     else:
         filename, w, h = media_svc.save_image(data)
@@ -93,5 +102,6 @@ def delete_asset(asset_id: str, db: Session = Depends(get_db), user: User = Depe
     storage.remove_rel(f"uploads/{a.filename}")
     if (a.meta or {}).get("full", {}).get("file"):
         storage.remove_rel(f"uploads/{a.meta['full']['file']}")
+    video_avatar.remove_files(a.meta)
     db.delete(a)
     db.commit()

@@ -49,7 +49,7 @@ class ProjectUpdate(BaseModel):
     intro_enabled: bool | None = None
     intro_title: str | None = Field(default=None, max_length=120)
     gestures_enabled: bool | None = None
-    animation_engine: Literal["builtin", "sadtalker", "gpu_echomimic", "gpu_sadtalker"] | None = None
+    animation_engine: Literal["builtin", "sadtalker", "gpu_echomimic", "gpu_sadtalker", "gpu_lipsync"] | None = None
     framing: Literal["scene", "photo"] | None = None
     scenes: list[SceneIn] | None = None
 

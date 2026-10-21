@@ -72,6 +72,7 @@ def build_spec(db, project: Project) -> tuple[renderer.RenderSpec, dict[str, Pat
         intro_enabled=project.intro_enabled, intro_title=project.intro_title or project.title,
         gestures_enabled=project.gestures_enabled, animation_engine=project.animation_engine,
         framing=project.framing, photo_full_path=full_path,
+        video_avatar=avatar_meta if avatar_meta.get("video") else None,
     )
     return spec, paths
 

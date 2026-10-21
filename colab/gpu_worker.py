@@ -3,15 +3,18 @@
 Protocol (all requests need header X-Token):
     GET  /health             engines + GPU info
     POST /jobs               multipart: engine=echomimic|sadtalker, fps, image (PNG), audio (WAV)  -> {"id"}
+                             or engine=lipsync, fps, video (MP4), audio (WAV): re-generates the mouth in the video
     GET  /jobs/{id}          {"status": queued|running|done|failed, "message", "engine_used"}
     GET  /jobs/{id}/video    the MP4 (same size as the input image, with the input audio)
 
 Engines (installed by the notebook, each in its own Python 3.10 virtualenv):
     echomimic -> EchoMimicV2 (https://github.com/antgroup/echomimic_v2, Apache-2.0): half body + hand gestures
     sadtalker -> SadTalker  (https://github.com/OpenTalker/SadTalker, Apache-2.0): face / head
+    lipsync   -> LatentSync (https://github.com/bytedance/LatentSync, Apache-2.0): lip-sync of a real video (the
+                 user's own looped footage, or the app's animated photo), keeping the real head and body movement
 If EchoMimicV2 fails (e.g. out of GPU memory) the job automatically falls back to SadTalker and says so.
 
-Environment: WORKER_TOKEN, WORK_DIR, ECHOMIMIC_DIR, ECHOMIMIC_PY, SADTALKER_DIR, SADTALKER_PY,
+Environment: WORKER_TOKEN, WORK_DIR, ECHOMIMIC_DIR, ECHOMIMIC_PY, SADTALKER_DIR, SADTALKER_PY, LATENTSYNC_DIR, LATENTSYNC_PY,
              WORKER_STUB=1 (testing only: "engines" just turn the image + audio into a video with ffmpeg).
 """
 import os
@@ -36,6 +39,7 @@ STUB = os.environ.get("WORKER_STUB") == "1"
 ENG = {
     "echomimic": (Path(os.environ.get("ECHOMIMIC_DIR", "/content/echomimic_v2")), os.environ.get("ECHOMIMIC_PY", "/content/env_echomimic/bin/python")),
     "sadtalker": (Path(os.environ.get("SADTALKER_DIR", "/content/SadTalker")), os.environ.get("SADTALKER_PY", "/content/env_sadtalker/bin/python")),
+    "lipsync": (Path(os.environ.get("LATENTSYNC_DIR", "/content/LatentSync")), os.environ.get("LATENTSYNC_PY", "/content/env_latentsync/bin/python")),
 }
 app = FastAPI(title="VideoAI GPU worker")
 jobs: dict[str, dict] = {}
@@ -96,6 +100,11 @@ def engine_status(name: str) -> dict:
             problems.append("code missing")
         if not (d / "checkpoints" / "SadTalker_V0.0.2_256.safetensors").exists():
             problems.append("weights missing")
+    elif name == "lipsync":
+        if not (d / "scripts" / "inference.py").exists():
+            problems.append("code missing")
+        if not (d / "checkpoints" / "latentsync_unet.pt").exists() or not (d / "checkpoints" / "whisper" / "tiny.pt").exists():
+            problems.append("weights missing")
     else:
         if not any((d / s).exists() for s in ("infer_acc.py", "infer.py")):
             problems.append("code missing")
@@ -107,6 +116,8 @@ def engine_status(name: str) -> dict:
 # ----------------------------------------------------------------------------- engines
 def run_stub(image: Path, audio: Path, job: Path) -> Path:
     raw = job / "stub.mp4"
+    if image.suffix == ".mp4":  # lipsync stub: the video unchanged
+        return image
     _ffmpeg("-loop", "1", "-i", str(image), "-i", str(audio), "-shortest", "-r", "25", "-pix_fmt", "yuv420p",
             "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(raw))
     return raw
@@ -121,6 +132,39 @@ def run_sadtalker(image: Path, audio: Path, job: Path) -> Path:
     if not vids:
         raise EngineError("SadTalker produced no video")
     return vids[-1]
+
+
+def run_latentsync(video: Path, audio: Path, job: Path) -> Path:
+    """LatentSync: re-generates the lower face of every frame from the audio (the face must be visible in each frame)."""
+    d, py = ENG["lipsync"]
+    helptext = _run([py, "-m", "scripts.inference", "--help"], cwd=d, timeout=900).stdout
+    has = lambda flag: re.search(rf"(^|\s){re.escape(flag)}[\s,=]", helptext) is not None
+    needed = ["--unet_config_path", "--inference_ckpt_path", "--video_path", "--audio_path", "--video_out_path"]
+    missing = [f for f in needed if not has(f)]
+    if missing:
+        raise EngineError(f"LatentSync's scripts/inference.py has a different interface than expected (missing {', '.join(missing)})")
+    configs = sorted((d / "configs" / "unet").glob("stage2*.yaml"))
+    config = d / "configs" / "unet" / os.environ.get("LATENTSYNC_CONFIG", "stage2.yaml")
+    if not config.exists():
+        if not configs:
+            raise EngineError("LatentSync config configs/unet/stage2.yaml not found")
+        config = configs[0]
+    v25, a16 = job / "ls_in.mp4", job / "ls_in.wav"
+    _ffmpeg("-i", str(video), "-r", "25", "-an", "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", str(v25))
+    _ffmpeg("-i", str(audio), "-ar", "16000", "-ac", "1", str(a16))
+    out = job / "latentsync.mp4"
+    args = [py, "-m", "scripts.inference", "--unet_config_path", str(config),
+            "--inference_ckpt_path", str(d / "checkpoints" / "latentsync_unet.pt"),
+            "--video_path", str(v25), "--audio_path", str(a16), "--video_out_path", str(out)]
+    for flag, val in (("--inference_steps", "20"), ("--guidance_scale", "1.5"), ("--seed", "1247")):
+        if has(flag):
+            args += [flag, val]
+    if has("--enable_deepcache"):
+        args.append("--enable_deepcache")
+    _run(args, cwd=d)
+    if not out.exists():
+        raise EngineError("LatentSync produced no video")
+    return out
 
 
 ECHO_SIZE = 768
@@ -180,10 +224,13 @@ def process(job_id: str) -> None:
     j["status"] = "running"
     t0 = time.time()
     try:
-        image, audio, out = jd / "in.png", jd / "in.wav", jd / "out.mp4"
+        image, audio, out = jd / ("in.mp4" if j["engine"] == "lipsync" else "in.png"), jd / "in.wav", jd / "out.mp4"
         if STUB:
             _finish(run_stub(image, audio, jd), image, audio, out, j["fps"])
             j["engine_used"], j["message"] = j["engine"], f"stub {j['engine']}"
+        elif j["engine"] == "lipsync":
+            _finish(run_latentsync(image, audio, jd), image, audio, out, j["fps"])
+            j["engine_used"], j["message"] = "lipsync", f"LatentSync lip-sync on the GPU in {time.time() - t0:.0f}s"
         elif j["engine"] == "echomimic":
             try:
                 raw, crop = run_echomimic(image, audio, jd, j["fps"])
@@ -222,18 +269,21 @@ def health(x_token: str | None = Header(default=None)):
 
 
 @app.post("/jobs")
-async def create_job(engine: str = Form(...), fps: int = Form(24), image: UploadFile = File(...), audio: UploadFile = File(...),
-                     x_token: str | None = Header(default=None)):
+async def create_job(engine: str = Form(...), fps: int = Form(24), image: UploadFile | None = File(None),
+                     video: UploadFile | None = File(None), audio: UploadFile = File(...), x_token: str | None = Header(default=None)):
     _auth(x_token)
     if engine not in ENG:
-        raise HTTPException(422, "engine must be echomimic or sadtalker")
+        raise HTTPException(422, "engine must be echomimic, sadtalker or lipsync")
+    src = video if engine == "lipsync" else image
+    if src is None:
+        raise HTTPException(422, "lipsync needs a video file" if engine == "lipsync" else f"{engine} needs an image file")
     st = engine_status(engine)
     if not st["ready"] and not (engine == "echomimic" and engine_status("sadtalker")["ready"]):
         raise HTTPException(503, f"{engine} is not installed: {st.get('problems')}")
     job_id = uuid.uuid4().hex[:12]
     jd = WORK / job_id
     jd.mkdir(parents=True)
-    (jd / "in.png").write_bytes(await image.read())
+    (jd / ("in.mp4" if engine == "lipsync" else "in.png")).write_bytes(await src.read())
     (jd / "in.wav").write_bytes(await audio.read())
     jobs[job_id] = {"status": "queued", "engine": engine, "fps": max(1, min(60, fps)), "message": "", "engine_used": None}
     q.put(job_id)

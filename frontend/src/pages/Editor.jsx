@@ -20,7 +20,7 @@ const bgCss = (bg, assets, sceneries = []) => {
 }
 
 /* ---------- reusable bits ---------- */
-function UploadButton({ kind, label, onUploaded, setError, extra, className = 'btn-secondary' }) {
+function UploadButton({ kind, label, onUploaded, setError, extra, className = 'btn-secondary', accept = 'image/png,image/jpeg,image/webp', busyLabel }) {
   const ref = useRef()
   const [busy, setBusy] = useState(false)
   const pick = async (e) => {
@@ -32,9 +32,9 @@ function UploadButton({ kind, label, onUploaded, setError, extra, className = 'b
   }
   return (
     <>
-      <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pick} />
+      <input ref={ref} type="file" accept={accept} hidden onChange={pick} />
       <button type="button" className={className} disabled={busy} onClick={() => ref.current.click()}>
-        {busy ? <Spinner className="h-4 w-4" /> : '⬆'} {label}
+        {busy ? <Spinner className="h-4 w-4" /> : '⬆'} {busy && busyLabel ? busyLabel : label}
       </button>
     </>
   )
@@ -91,7 +91,16 @@ function BackgroundPicker({ value, onChange, assets, onAsset, gradients, setErro
 
 /* ---------- live preview ---------- */
 function Preview({ p, avatarUrl, assets, sceneIdx, mediaAsset, sceneries }) {
-  const photoAsset = p.framing === 'photo' && p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id) : null
+  const ownAsset = p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id) : null
+  if (ownAsset?.video_url) {  // video avatar: the real clip fills the frame
+    return (
+      <div className={`relative mx-auto w-full overflow-hidden rounded-xl bg-slate-900 shadow-lg ${p.aspect_ratio !== '16:9' ? 'max-w-[260px]' : ''}`} style={{ aspectRatio: ASPECT_CSS[p.aspect_ratio] }}>
+        <video src={mediaUrl(ownAsset.video_url)} poster={ownAsset.full_url ? mediaUrl(ownAsset.full_url) : undefined} autoPlay muted loop playsInline aria-label="Your video avatar" className="absolute inset-0 h-full w-full object-cover object-top" />
+        {p.captions_enabled && <div className="absolute inset-x-0 bottom-[12%] text-center text-sm font-extrabold text-white [-webkit-text-stroke:2px_black] [paint-order:stroke_fill]">Your captions appear here</div>}
+      </div>
+    )
+  }
+  const photoAsset = p.framing === 'photo' ? ownAsset : null
   if (photoAsset?.full_url) {
     return (
       <div className={`relative mx-auto w-full overflow-hidden rounded-xl bg-slate-900 shadow-lg ${p.aspect_ratio !== '16:9' ? 'max-w-[260px]' : ''}`} style={{ aspectRatio: ASPECT_CSS[p.aspect_ratio] }}>
@@ -286,14 +295,15 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
   const mine = assets.filter((a) => a.kind === 'avatar')
   const [gender, setGender] = useState('female')
   const [removeBg, setRemoveBg] = useState(true)
-  const Tile = ({ id, url, name, gender: g, warn, onDelete }) => (
+  const Tile = ({ id, url, name, gender: g, warn, onDelete, video }) => (
     <div className="relative">
       <button type="button" onClick={() => chooseAvatar(id, g)} aria-pressed={p.avatar_id === id}
         className={`block w-full overflow-hidden rounded-xl border-2 bg-gradient-to-br from-brand-100 to-slate-100 p-1 ${p.avatar_id === id ? 'border-brand-600 shadow-md' : 'border-transparent hover:border-slate-300'}`}>
         <img src={mediaUrl(url)} alt={name} className="aspect-square w-full object-contain" />
         <span className="block truncate pb-1 text-center text-sm font-medium">{name}{g ? ` · ${g}` : ''}</span>
       </button>
-      {warn && <span title={warn} className="absolute left-1 top-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700 shadow">⚠ check photo</span>}
+      {warn && <span title={warn} className="absolute left-1 top-1 rounded-full bg-amber-100 px-1.5 text-xs text-amber-700 shadow">⚠ check {video ? 'video' : 'photo'}</span>}
+      {video && <span className="absolute bottom-8 left-1 rounded-full bg-slate-900/80 px-1.5 text-xs text-white shadow">🎥 {Math.round(video)} s video</span>}
       {onDelete && <button onClick={onDelete} aria-label="Delete upload" className="absolute right-1 top-1 rounded-full bg-white/90 px-1.5 text-red-600 shadow">×</button>}
     </div>
   )
@@ -305,6 +315,15 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
       </section>
       {(() => {
         const sel = p.avatar_id.startsWith('asset:') ? assets.find((a) => `asset:${a.id}` === p.avatar_id && a.mouth) : null
+        if (sel?.video_url) {  // the face is tracked in every frame of a video: nothing to fine-tune
+          return (
+            <section className="card p-4 text-sm">
+              <h3 className="font-semibold">🎥 Your video avatar ({Math.round(sel.video_seconds)} s)</h3>
+              <p className="mt-1 text-emerald-700">✓ Face tracked in every frame. The clip is looped for the whole video and the mouth follows the voice.</p>
+              {sel.warning && <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">⚠ {sel.warning}</p>}
+            </section>
+          )
+        }
         return sel ? <MouthTuner asset={sel} onAsset={onAsset} setError={setError} /> : null
       })()}
       {faceTracking === false && (
@@ -313,6 +332,26 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
           See <Link to="/system" className="underline">System check</Link>.
         </p>
       )}
+      <section className="card border-brand-200 p-4">
+        <h3 className="font-semibold">🎥 Use a video of yourself <span className="ml-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs text-brand-700">most realistic</span></h3>
+        <p className="mt-1 text-sm text-slate-500">Upload a 10–15 second clip of you (MP4, MOV or WebM). Your real head, body and blink movement is
+          looped for the whole video and only your mouth is re-animated to the new voice, like HeyGen video avatars.
+          For HeyGen-quality lips choose <b>Real lip-sync (Colab GPU)</b> in Look &amp; feel.</p>
+        <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-slate-500">
+          <li>Look into the camera, face fully visible, good even light (face a window).</li>
+          <li>Keep your lips relaxed and closed or slightly smiling; move your head and shoulders naturally, nod a little.</li>
+          <li>Phone on a stand at eye level, no hands in front of the face; the sound of the clip is not used.</li>
+        </ul>
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+          <label className="flex items-center gap-2">Voice type
+            <select className="input !w-auto !py-1" value={gender} onChange={(e) => setGender(e.target.value)} aria-label="Voice type for this video">
+              <option value="female">Female</option><option value="male">Male</option>
+            </select>
+          </label>
+          <UploadButton kind="avatar_video" label="Upload video" busyLabel="Uploading & tracking your face…" accept="video/mp4,video/quicktime,video/webm,video/*" extra={{ gender }} setError={setError}
+            className="btn-primary" onUploaded={(a) => { onAsset(a); chooseAvatar(`asset:${a.id}`, a.gender, true) }} />
+        </div>
+      </section>
       <section className="card p-4">
         <h3 className="font-semibold">Use your own photo</h3>
         <p className="mt-1 text-sm text-slate-500">Upload a clear, front-facing photo (PNG, JPG or WebP). We detect the face, can remove the photo background so you stand in the scene, and animate head, eyes and mouth.</p>
@@ -327,7 +366,7 @@ function AvatarTab({ p, avatars, assets, onAsset, setError, removeAsset, chooseA
         </div>
         {mine.length > 0 && (
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {mine.map((a) => <Tile key={a.id} id={`asset:${a.id}`} url={a.url} name={a.name || 'Upload'} gender={a.gender}
+            {mine.map((a) => <Tile key={a.id} id={`asset:${a.id}`} url={a.url} name={a.name || 'Upload'} gender={a.gender} video={a.video_seconds}
               warn={a.warning || (a.face_found === false ? 'No face was detected, so the mouth position is a guess. Try a clearer front-facing photo.' : null)} onDelete={() => removeAsset(a)} />)}
           </div>
         )}
@@ -397,6 +436,7 @@ function VoiceTab({ p, set, voices }) {
 function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
   const audio = useRef()
   const playTrack = (t) => { audio.current.src = mediaUrl(t.url); audio.current.play() }
+  const isVideo = p.avatar_id.startsWith('asset:') && !!assets.find((a) => `asset:${a.id}` === p.avatar_id)?.video_url
   return (
     <div className="space-y-7">
       <section>
@@ -419,10 +459,11 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
       <section>
         <h3 className="mb-2 font-semibold">Animation engine</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          {[['gpu_echomimic', 'HeyGen-like (EchoMimicV2, Colab GPU)', cfg?.remote_gpu ? 'Neural half-body video: real mouth, head and hand gestures. Runs on the free Colab GPU; slow (minutes per scene).' : 'Connect the free Google Colab GPU worker on the System check page first.', cfg?.remote_gpu],
+          {[['gpu_lipsync', 'Real lip-sync (LatentSync, Colab GPU)', cfg?.remote_gpu ? 'Best with a video avatar: keeps your real movement and re-generates the mouth to match the voice, like HeyGen. Also works on photos.' : 'Needs the free Colab GPU worker (System check).', cfg?.remote_gpu],
+            ['gpu_echomimic', 'HeyGen-like (EchoMimicV2, Colab GPU)', cfg?.remote_gpu ? 'Neural half-body video: real mouth, head and hand gestures. Runs on the free Colab GPU; slow (minutes per scene).' : 'Connect the free Google Colab GPU worker on the System check page first.', cfg?.remote_gpu],
             ['gpu_sadtalker', 'Realistic face (SadTalker, Colab GPU)', cfg?.remote_gpu ? 'Neural lip-sync and head motion on the Colab GPU (~1 min per scene).' : 'Needs the Colab GPU worker (System check).', cfg?.remote_gpu],
             ['sadtalker', 'Realistic face (SadTalker, this PC)', cfg?.sadtalker_ready ? 'Neural lip-sync on this computer. Very slow without an NVIDIA GPU.' : 'Not installed on this server (setup-sadtalker.ps1).', cfg?.sadtalker_ready],
-            ['builtin', 'Built-in (fast)', 'Instant 2D animation of your photo. Works on any computer; good for drafts.', true]].map(([id, name, desc, enabled]) => (
+            ['builtin', 'Built-in (fast)', 'Instant animation on this computer: moves your photo, or loops your video with an animated mouth. Good for drafts.', true]].map(([id, name, desc, enabled]) => (
             <button key={id} type="button" disabled={!enabled} onClick={() => set({ animation_engine: id })} aria-pressed={p.animation_engine === id}
               className={`rounded-xl border-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${p.animation_engine === id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}>
               <div className="text-sm font-semibold">{name}</div><div className="text-xs text-slate-500">{desc}</div>
@@ -431,7 +472,8 @@ function LookTab({ p, set, cfg, assets, onAsset, setError, music, sceneries }) {
         </div>
         {!cfg?.remote_gpu && <p className="mt-2 text-xs"><Link to="/system" className="text-brand-600 underline">Connect the free Colab GPU for HeyGen-like videos →</Link></p>}
       </section>
-      {p.avatar_id.startsWith('asset:') && (
+      {isVideo && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">🎥 Video avatar: your clip fills the frame with its own background. Engines that work from one photo (EchoMimicV2, SadTalker) use a still frame of it.</p>}
+      {p.avatar_id.startsWith('asset:') && !isVideo && (
         <section>
           <h3 className="mb-2 font-semibold">Framing</h3>
           <div className="grid gap-3 sm:grid-cols-2">

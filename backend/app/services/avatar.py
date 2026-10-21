@@ -118,11 +118,14 @@ def lens_profile(us: np.ndarray, mouth_w: float, fw: float, size: int) -> np.nda
 
 
 def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height: float, a: float, fw: float, size: int,
-                    top_offset=None) -> None:
+                    top_offset=None, soft: float = 0.0, tint=None) -> None:
     """Inner mouth for photos. Fills exactly the gap the jaw warp opens below the lip seam (cx, cy): shaded cavity,
-    upper teeth, tongue when wide, and a wet lower-lip highlight. Supersampled + feathered to blend with the photo."""
+    upper teeth, tongue when wide, and a wet lower-lip highlight. Supersampled + feathered to blend with the photo.
+    soft > 0 (real video footage): darker, low-contrast interior blurred by `soft` px to match the footage's sharpness;
+    `tint` (the person's lip colour, RGB) colours the cavity and teeth so they match the footage's lighting / white balance."""
     if height < 2.0:
         return
+    video = soft > 0
     ss = 3
     half = width * 0.5
     pad = int(width * 0.35) + 6
@@ -143,35 +146,44 @@ def draw_open_mouth(img: Image.Image, cx: float, cy: float, width: float, height
     rows = np.arange(H, dtype=np.float32)
     t = np.clip((rows - oy) / max(1.0, height * ss), 0, 1)[:, None]
     arr = np.zeros((H, W, 4), np.uint8)
-    arr[..., 0] = (34 + 52 * t).astype(np.uint8)
-    arr[..., 1] = (8 + 14 * t).astype(np.uint8)
-    arr[..., 2] = (12 + 18 * t).astype(np.uint8)
+    lip = np.array(tint if tint is not None else (170, 100, 100), np.float32)
+    if video:  # real mouths are nearly black inside, warming slightly toward the lower lip
+        for ch in range(3):
+            arr[..., ch] = np.clip(lip[ch] * (0.17 + 0.25 * t), 0, 255).astype(np.uint8)
+    else:
+        arr[..., 0] = (34 + 52 * t).astype(np.uint8)
+        arr[..., 1] = (8 + 14 * t).astype(np.uint8)
+        arr[..., 2] = (12 + 18 * t).astype(np.uint8)
     arr[..., 3] = 255
     layer = Image.fromarray(arr, "RGBA")
     feat = Image.new("RGBA", (W, H), (0, 0, 0, 0))  # teeth / tongue drawn separately so they can be softened
     d = ImageDraw.Draw(feat)
+    teeth_k = 0.8 if video else 1.0
     if height > width * 0.06:  # upper teeth: a soft, shaded band that follows the curved top edge and fades into the cavity
         tprof = np.clip(1 - np.abs(us) ** 2.4, 0, 1) ** 0.5
-        th = height * 0.34
+        th = height * (0.45 if video else 0.34)
         for j in range(n - 1):
             x0, x1 = xs[j], xs[j + 1]
             hh = th * float(tprof[j]) * 0.82 * ss
             if hh < 1:
                 continue
             for k in range(int(hh)):
-                shade = 1 - 0.55 * (k / max(1.0, hh)) ** 1.3
-                d.line([(x0, oy + toff[j] * ss + k), (x1, oy + toff[j + 1] * ss + k)], fill=(int(176 * shade), int(166 * shade), int(152 * shade), int(225 * shade + 10)))
-    if a > 0.75 and height > width * 0.14:  # tongue, dark and soft
+                shade = 1 - 0.55 * (k / max(1.0, hh)) ** (3.0 if video else 1.3)
+                tc = tuple(lip * 0.45 + np.array((236, 232, 224)) * 0.55 * min(1.0, float(lip.mean()) / 120)) if video else (176, 166, 152)
+                d.line([(x0, oy + toff[j] * ss + k), (x1, oy + toff[j + 1] * ss + k)], fill=(int(tc[0] * shade), int(tc[1] * shade), int(tc[2] * shade), int((225 * shade + 10) * teeth_k)))
+    if a > 0.75 and height > width * 0.14 and not video:  # tongue, dark and soft
         d.ellipse([ox - half * 0.38 * ss, oy + height * 0.52 * ss, ox + half * 0.38 * ss, oy + height * 0.92 * ss], fill=(118, 46, 56, 215))
     feat = feat.filter(ImageFilter.GaussianBlur(0.9 * ss))
     layer = Image.alpha_composite(layer, feat)
     layer.putalpha(cav.filter(ImageFilter.GaussianBlur(0.7 * ss)))
     edge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ed = ImageDraw.Draw(edge)
-    ed.line(bot[::-1], fill=(196, 120, 122, 150), width=max(1, int(1.6 * ss)))  # wet lower-lip edge
-    ed.line(top, fill=(40, 12, 14, 170), width=max(1, int(1.3 * ss)))            # shadow under the upper lip
+    ed.line(bot[::-1], fill=(196, 120, 122, 70 if video else 150), width=max(1, int(1.6 * ss)))  # wet lower-lip edge
+    ed.line(top, fill=(40, 12, 14, 90 if video else 170), width=max(1, int(1.3 * ss)))  # shadow under the upper lip
     layer = Image.alpha_composite(layer, edge.filter(ImageFilter.GaussianBlur(0.6 * ss)))
     layer = layer.resize((pw, ph), Image.LANCZOS)
+    if video:
+        layer = layer.filter(ImageFilter.GaussianBlur(soft))
     img.alpha_composite(layer, (int(cx - pw / 2), int(cy - oy / ss)))
 
 
@@ -201,6 +213,7 @@ def _make_hands(base: Image.Image, m: dict, size: int, env: np.ndarray, fps: int
 class PuppetAvatarProvider(AvatarProvider):
     name = "amplitude"
     G = 96  # resolution of the coarse displacement grid
+    draw_mouth = True  # False: head/body motion only (a GPU lip-sync model adds the mouth afterwards)
 
     def _field(self, x, y, m, p):
         """Displacement (normalised units) at normalised points (x, y); `p` holds this frame's motion parameters.
@@ -289,7 +302,7 @@ class PuppetAvatarProvider(AvatarProvider):
                 "breath": 0.007 * math.sin(2 * math.pi * 0.27 * t + ph[4]),
                 "sway": g * 0.012 * math.sin(2 * math.pi * 0.15 * t + ph[5]) + 0.003 * math.sin(2 * math.pi * 0.41 * t + ph[6]),
                 "brow": float(np.clip(1.4 * (e - 0.35), 0, 1)) * (0.6 + 0.4 * math.sin(2 * math.pi * 0.9 * t + ph[7])),
-                "jaw": a * jaw_max,
+                "jaw": a * jaw_max if self.draw_mouth else 0.0,
                 "blink": closed,
             }
             dxs, dys = self._field(gx, gy, m, p)
@@ -309,7 +322,9 @@ class PuppetAvatarProvider(AvatarProvider):
 
             mx, my, mw = m["mouth"]
             cx, cy = moved(mx, my)
-            if photo:
+            if not self.draw_mouth:
+                pass
+            elif photo:
                 h_px = a * jaw_max * size + 0.004 * m.get("motion_scale", 1.0) * size * (1 if a > 0.02 else 0)  # the gap the warp opens
                 width_px = mw * size * (1.0 - 0.10 * a)
                 off = None

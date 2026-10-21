@@ -14,7 +14,8 @@ from ..config import ASSETS_DIR, get_settings
 from . import avatar as avatar_mod
 from . import face as face_mod
 from . import captions as cap
-from . import tts
+from . import remote_gpu, tts
+from . import video_avatar as video_mod
 
 
 class RenderError(RuntimeError):
@@ -43,9 +44,10 @@ class RenderSpec:
     intro_enabled: bool = True
     intro_title: str = ""
     gestures_enabled: bool = True
-    animation_engine: str = "builtin"  # builtin | sadtalker | gpu_echomimic | gpu_sadtalker
+    animation_engine: str = "builtin"  # builtin | sadtalker | gpu_echomimic | gpu_sadtalker | gpu_lipsync
     framing: str = "scene"  # scene: cut-out on a background | photo: original photo fills the frame (HeyGen style)
     photo_full_path: Path | None = None
+    video_avatar: dict | None = None  # meta of a video avatar (real footage of the person, looped)
 
 
 @dataclass
@@ -198,6 +200,24 @@ def probe_duration(path: Path) -> float:
         return 0.0
 
 
+def _decode(video: Path, W: int, H: int, fps: int, n_frames: int):
+    """Frames of an MP4 as W x H RGB images, exactly n_frames (the last frame repeats if the video is short)."""
+    proc = subprocess.Popen([get_settings().ffmpeg_bin, "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},scale={W}:{H}",
+                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    last = None
+    try:
+        for _ in range(n_frames):
+            buf = proc.stdout.read(W * H * 3)
+            if len(buf) == W * H * 3:
+                last = Image.frombytes("RGB", (W, H), buf)
+            if last is None:
+                raise RenderError("the lip-sync result could not be decoded")
+            yield last.copy()  # callers draw captions onto the frame
+    finally:
+        proc.stdout.close()
+        proc.wait()
+
+
 def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Path, progress: Progress,
                  bg_paths: dict[str, Path] | None = None) -> RenderResult:
     s = get_settings()
@@ -217,10 +237,21 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
     cap_r = cap.CaptionRenderer(W, H, spec.caption_style, all_text)
     title = (spec.intro_title or "").strip()
     PAN = 1.12  # background is rendered 12% larger and drifts slowly for a sense of camera movement
-    photo_mode = bool(spec.framing == "photo" and spec.photo_full_path and spec.photo_full_path.exists()
+    lipsync = spec.animation_engine == "gpu_lipsync"
+    vavatar = None
+    if spec.video_avatar and spec.animation_engine in ("builtin", "gpu_lipsync"):
+        try:
+            vavatar = video_mod.load(spec.video_avatar)
+        except Exception as e:
+            notes.append(f"⚠ Video avatar unavailable ({str(e)[:200]}); animated its photo instead")
+    elif spec.video_avatar:
+        notes.append(f"Video avatar: the {spec.animation_engine} engine works from one photo, so a still frame of your clip was used")
+    if lipsync:
+        provider.draw_mouth = False  # the GPU model draws the mouth; the built-in animation only supplies the motion
+    photo_mode = bool(vavatar is None and spec.framing == "photo" and spec.photo_full_path and spec.photo_full_path.exists()
                       and (spec.avatar_meta or {}).get("full"))
     avatar_path, avatar_meta = spec.avatar_path, spec.avatar_meta
-    if spec.framing == "photo" and not photo_mode:
+    if spec.framing == "photo" and not photo_mode and vavatar is None:
         notes.append("⚠ Original-photo framing needs an uploaded photo (re-upload older ones); used the cut-out instead")
     if photo_mode:  # HeyGen style: the original photo is the whole frame and is animated in place
         pc, avatar_meta = face_mod.photo_canvas(Image.open(spec.photo_full_path), spec.avatar_meta, W, H)
@@ -249,7 +280,7 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
         total = lead + max(speech, 0.8) + 0.45
         n_frames = math.ceil(total * fps)
 
-        has_media = bool(sc.media_path and sc.media_path.exists()) and not photo_mode
+        has_media = bool(sc.media_path and sc.media_path.exists()) and not photo_mode and vavatar is None
         size, cx, bottom, media_box, cap_y = layout(spec.aspect_ratio, W, H, has_media)
         if photo_mode:
             size = max(W, H)
@@ -289,13 +320,25 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
         stage = {"sadtalker": "realistic lip-sync with SadTalker (can take minutes)",
                  "gpu_echomimic": "generating on the Colab GPU with EchoMimicV2 (can take a long time)",
                  "gpu_sadtalker": "generating on the Colab GPU with SadTalker"}.get(provider.name, "animating avatar")
+        if vavatar is not None:
+            stage = "animating your video"
         progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: {stage}")
         if avatar_path is None:
             raise RenderError("No avatar selected")
-        gestures_on = spec.gestures_enabled and not photo_mode  # no drawn hands on a real photo
-        frames_iter = provider.frames(avatar_path, avatar_meta, wav, size, fps, n_frames, workdir, seed=si,
-                                      gestures=gestures_on)
-        if provider.name != avatar_mod.PuppetAvatarProvider.name:
+        gestures_on = spec.gestures_enabled and not photo_mode and vavatar is None  # no drawn hands on real photos / video
+        cursor0 = vavatar.cursor if vavatar is not None else 0.0
+
+        def avatar_frames(mouth: bool):
+            if vavatar is not None:
+                vavatar.cursor = cursor0
+                return vavatar.frames(wav, W, H, fps, n_frames, draw_mouth=mouth)
+            prov = provider
+            if mouth and not getattr(provider, "draw_mouth", True):
+                prov = avatar_mod.PuppetAvatarProvider()
+            return prov.frames(avatar_path, avatar_meta, wav, size, fps, n_frames, workdir, seed=si, gestures=gestures_on)
+
+        frames_iter = avatar_frames(not lipsync)
+        if vavatar is None and provider.name != avatar_mod.PuppetAvatarProvider.name:
             try:  # external engines do their heavy work on the first frame: fail over to the built-in animation
                 first = next(frames_iter)
                 frames_iter = itertools.chain([first], frames_iter)
@@ -307,12 +350,13 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
                                                                         workdir, seed=si, gestures=gestures_on)
         thumb_at = min(n_frames - 1, int((lead + 0.7) * fps)) if si == 0 else None
 
-        def raw_frames():
-            nonlocal thumb_saved, prev_last
-            frame = None
+        def base_frames(frames_iter, entrance: bool):
+            """Background + avatar (no titles / captions) as W x H RGB images."""
             for i, av in enumerate(frames_iter):
                 t = i / fps
-                if photo_mode:  # the animated photo is the whole frame
+                if vavatar is not None:  # the (mouth-animated) footage is the whole frame
+                    frame, av = av, None
+                elif photo_mode:  # the animated photo is the whole frame
                     frame = av.crop((PF["x"], PF["y"], PF["x"] + W, PF["y"] + H)).convert("RGB")
                     av = None
                 else:
@@ -325,13 +369,36 @@ def render_video(spec: RenderSpec, workdir: Path, out_video: Path, out_thumb: Pa
                 if av is not None:
                     # avatar entrance during the intro: rise + fade in
                     dy = 0
-                    if si == 0 and lead:
+                    if si == 0 and lead and entrance:
                         e = _ease_out(t / 0.9)
                         dy = int((1 - e) * 0.12 * size)
                         if e < 1:
                             av = av.copy()
                             av.putalpha(av.getchannel("A").point(lambda v, e=e: int(v * e)))
                     frame.paste(av, (ax, ay + dy), av)
+                yield frame
+
+        bases = base_frames(frames_iter, entrance=not lipsync)
+        if lipsync:  # send the moving (mouth-less) video to the GPU worker; LatentSync re-generates the lower face
+            progress(lo + (hi - lo) // 4, f"Scene {si + 1}/{n}: lip-syncing on the Colab GPU (LatentSync)")
+            base_mp4 = workdir / f"lipsync_in{si}.mp4"
+            try:
+                _run_ffmpeg(["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
+                             "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p", str(base_mp4)],
+                            stdin_frames=(f.tobytes() for f in bases))
+                synced, msg = remote_gpu.render("lipsync", base_mp4, wav, workdir / f"lipsync_out{si}.mp4", fps)
+                bases = _decode(synced, W, H, fps, n_frames)
+                if msg:
+                    notes.append(f"Scene {si + 1}: {msg}")
+            except Exception as e:
+                notes.append(f"⚠ Scene {si + 1}: GPU lip-sync failed ({str(e)[:300]}); used the built-in mouth animation instead")
+                bases = base_frames(avatar_frames(True), entrance=True)
+
+        def raw_frames():
+            nonlocal thumb_saved, prev_last
+            frame = None
+            for i, frame in enumerate(bases):
+                t = i / fps
                 if title_layer is not None and t < lead:
                     ta = min(1.0, max(0.0, (t - 0.15) / 0.6)) * min(1.0, max(0.0, (lead - 0.1 - t) / 0.4))
                     if ta > 0:

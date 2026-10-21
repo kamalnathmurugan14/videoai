@@ -202,6 +202,28 @@ def detect_landmarks(rgb: np.ndarray, near=None) -> dict | None:
     return {"pts": pts.astype(np.float32), "score": face["score"], "box": (face["cx"], face["cy"], face["w"], face["h"])}
 
 
+def track_landmarks(rgb: np.ndarray, prev_pts: np.ndarray) -> dict | None:
+    """Video tracking: run Face Mesh on the region where the face was in the previous frame (no detector pass, so it is
+    fast and does not jump between faces). Returns the same dict as detect_landmarks, or None if the face was lost."""
+    models = _interpreters()
+    if models is None:
+        return None
+    _, mesh = models
+    (x0, y0), (x1, y1) = prev_pts.min(0), prev_pts.max(0)
+    eyes = sorted([tuple(prev_pts[468]), tuple(prev_pts[473])])
+    side = max(x1 - x0, y1 - y0) * 0.96  # ~ the BlazeFace box size for this face
+    face = {"cx": float(x0 + x1) / 2, "cy": float(y0 + y1) / 2 + side * 0.02, "w": side, "h": side, "kps": eyes, "score": 1.0}
+    with _lock:
+        try:
+            pts = _mesh(rgb, face, mesh)
+        except Exception as e:
+            log.warning("landmark tracking failed: %s", e)
+            return None
+    if pts is None:
+        return None
+    return {"pts": pts.astype(np.float32), "score": 1.0, "box": (face["cx"], face["cy"], side, side)}
+
+
 def summarize(lm: dict) -> dict:
     """Reduce 478 landmarks to what the animator needs (pixel space)."""
     p = lm["pts"]
